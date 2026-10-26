@@ -14,25 +14,36 @@ It uses the public server list from [VPN Gate](https://www.vpngate.net), an acad
 
 ## Install
 
-You need **Node.js 18+** and **OpenVPN**.
-
 ```bash
-# macOS
-brew install openvpn
-
-# Debian / Ubuntu
-sudo apt install openvpn
+curl -fsSL https://raw.githubusercontent.com/devnazir/vpngate-cli/main/install.sh | sh
 ```
 
-Then install the CLI:
+The installer sets up everything:
+
+- **OpenVPN**, using your package manager (Homebrew, apt, dnf, yum, pacman, zypper or apk)
+- **Node.js**, only if you don't already have version 18 or newer. It downloads a private copy just for `vpngate`, so your system Node isn't touched.
+- the **`vpngate`** command in `/usr/local/bin`
+
+It asks for your password to install OpenVPN. On macOS you need [Homebrew](https://brew.sh). Windows is not supported yet.
+
+To uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/devnazir/vpngate-cli/main/install.sh | sh -s -- --uninstall
+```
+
+<details>
+<summary>Manual install</summary>
+
+Install **Node.js 18+** and **OpenVPN** (`brew install openvpn` or `sudo apt install openvpn`), then:
 
 ```bash
 git clone https://github.com/devnazir/vpngate-cli.git
 cd vpngate-cli
-npm link        # makes the `vpngate` command available everywhere
+npm link
 ```
 
-Windows is not supported yet.
+</details>
 
 ## Usage
 

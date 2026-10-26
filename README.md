@@ -18,6 +18,7 @@ It uses the public server list from [VPN Gate](https://www.vpngate.net), an acad
 | --- | --- | --- |
 | **[VPN mode](#vpn-mode)** `vpngate connect JP` | Sends all your computer's traffic through another country | OpenVPN, sudo |
 | **[Proxy mode](#proxy-mode)** `vpngate proxy JP` | A local SOCKS5 proxy in another country. Only the requests you send through it use the VPN. Several countries can run at once. Countries VPN Gate lacks use [Tor](#any-country-with-tor) automatically. | Docker, no sudo |
+| **[Browser](#browse-from-another-country)** `vpngate browser JP <url>` | Opens a separate browser window that browses from another country | Docker, no sudo |
 | **[Claude Code plugin](#use-with-claude-code)** | Lets Claude test websites from other countries for you | Docker |
 
 ## Install
@@ -147,11 +148,47 @@ vpngate connect --config ./nl.ovpn --auth ./login.txt
 
 `--auth` is only needed when the config asks for a username and password. Put the username on line 1 and the password on line 2. Proxy mode needs certificates inline in the `.ovpn` file, which is how most providers ship them.
 
+## Browse from another country
+
+One command starts a proxy and opens a separate browser window that browses from that country. Your normal browser stays on your normal connection.
+
+```bash
+vpngate browser NL https://example.com
+```
+
+```
+$ vpngate browser NL https://example.com
+No VPN Gate servers in Netherlands, using Tor instead.
+Tor · exits in Netherlands (can take up to a minute)
+      ✓ Proxy ready  socks5://127.0.0.1:1080
+      Exit IP 192.42.116.105 (Netherlands)
+✓ Opened Chrome browsing from Netherlands → https://example.com
+```
+
+- **Compare countries side by side:** run it again with another country. Each one gets its own proxy on the next free port and its own window.
+- **Reuses running proxies:** if a proxy for that country is already running, it opens a window on it instead of starting a new one.
+- **Remembers things:** each country has its own browser profile, so logins and storefront passwords are kept between runs.
+- **Pick a browser** with `--browser chrome|brave|edge|chromium|firefox` (Chrome by default).
+- **Without a country**, `vpngate browser <url>` opens a window on the proxy already running on `--port` (default 1080).
+
+When you're done, close the window and run `vpngate proxy stop`.
+
+### Testing a Shopify theme from another country
+
+Shopify decides the visitor's market from their IP, so open the **theme preview link** through the browser command:
+
+```bash
+vpngate browser NL "https://your-store.myshopify.com/?preview_theme_id=123456789"
+```
+
+For local development with `shopify theme dev`, use the preview link it prints, not `http://127.0.0.1:9292`. The local server fetches pages from Shopify using your own IP, so the proxy can't change the country there. The preview link shows your development theme and updates live as you edit.
+
 ## Options
 
 | Option | What it does |
 | --- | --- |
-| `--port <n>` | Local port for `proxy` (default 1080) |
+| `--port <n>` | Local port for `proxy` (default 1080). `browser` picks a free one. |
+| `--browser <name>` | Browser for `browser`: chrome, brave, edge, chromium or firefox (default chrome) |
 | `--via tor\|vpngate` | For `proxy`: force Tor or VPN Gate (by default, Tor is used only when VPN Gate lacks the country) |
 | `--config <file>` | Use your own `.ovpn` file instead of VPN Gate |
 | `--auth <file>` | Username and password for `--config` (line 1 and line 2) |

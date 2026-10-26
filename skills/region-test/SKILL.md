@@ -75,6 +75,13 @@ Geolocation by IP and language are separate things. Sites often decide language 
 `Accept-Language` header, so send it if you want to simulate a real local visitor, for example
 `-H 'Accept-Language: ja-JP,ja;q=0.9'`. Report which of the two caused a difference.
 
+If the user wants to look at it themselves, open a separate browser window for them that
+browses from the country (it starts or reuses the proxy):
+
+```bash
+vpngate browser NL "https://example.com"
+```
+
 ## 4. Stop when done
 
 ```bash

@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { bold, cyan, dim, green, mbps, red, table, yellow } from '../src/format.js';
 import { filterServers, getServers, groupByCountry } from '../src/servers.js';
 import { getTorExitCounts } from '../src/tor.js';
+import { browserLabel, browserNames, openBrowser } from '../src/browser.js';
 import { loadCustomConfig } from '../src/custom.js';
 import {
   buildImage,
@@ -41,6 +42,11 @@ ${bold('Usage')}
   vpngate proxy status        List running proxies
   vpngate proxy stop          Stop proxies (all, or the one on --port)
 
+  vpngate browser [country] [url]
+                              Open a separate browser window that browses from a country.
+                              Starts (or reuses) a proxy for it. Without a country, uses the
+                              proxy already running on --port.
+
 ${bold('Options')}
   --via <tor|vpngate> For "proxy": force Tor or VPN Gate. By default, countries without
                       VPN Gate servers use Tor automatically.
@@ -50,7 +56,8 @@ ${bold('Options')}
   --tries <n>         Servers to try before giving up (default 5)
   --timeout <sec>     Seconds to wait for each server (default 20, Tor 90)
   --limit <n>         Rows to show in "list" (default 20)
-  --port <n>          Local port for "proxy" (default 1080)
+  --port <n>          Local port for "proxy" (default 1080; "browser" picks a free one)
+  --browser <name>    For "browser": ${browserNames.join(', ')} (default chrome)
   --refresh           Ignore the cached server list
   -v, --verbose       Show OpenVPN output
   -h, --help          Show this help
@@ -62,6 +69,7 @@ ${bold('Examples')}
   vpngate proxy JP && curl -x socks5h://127.0.0.1:1080 https://example.com
   vpngate proxy NL                (no VPN Gate servers, so this uses Tor)
   vpngate proxy --config ./nl.ovpn --auth ./nl-login.txt
+  vpngate browser NL https://example.myshopify.com/?preview_theme_id=123
 
 Country can be a code (JP) or the start of a name (japan).
 Servers are run by volunteers via VPN Gate (https://www.vpngate.net).
@@ -85,6 +93,7 @@ try {
       timeout: { type: 'string' },
       limit: { type: 'string', default: '20' },
       port: { type: 'string' },
+      browser: { type: 'string' },
       refresh: { type: 'boolean', default: false },
       verbose: { type: 'boolean', short: 'v', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -103,18 +112,18 @@ async function loadServers() {
   return servers;
 }
 
-async function matchingServers() {
+async function matchingServers(country = countryArg) {
   if (opts.proto && !['tcp', 'udp'].includes(opts.proto)) fail('--proto must be tcp or udp');
-  return filterServers(await loadServers(), { country: countryArg, proto: opts.proto });
+  return filterServers(await loadServers(), { country, proto: opts.proto });
 }
 
-async function selectServers() {
-  const servers = await matchingServers();
+async function selectServers(country = countryArg) {
+  const servers = await matchingServers(country);
   if (servers.length === 0) {
-    const torHint = countryArg
-      ? `\n  It may be available through Tor, which works in proxy mode: vpngate proxy ${countryArg}`
+    const torHint = country
+      ? `\n  It may be available through Tor, which works in proxy mode: vpngate proxy ${country}`
       : '';
-    fail(`No VPN Gate servers found${countryArg ? ` for "${countryArg}"` : ''}. Run "vpngate countries" to see what's available.${torHint}`);
+    fail(`No VPN Gate servers found${country ? ` for "${country}"` : ''}. Run "vpngate countries" to see what's available.${torHint}`);
   }
   return servers;
 }
@@ -145,10 +154,10 @@ async function loadCustom({ forProxy }) {
   return server;
 }
 
-async function candidateServers({ forProxy }) {
+async function candidateServers({ forProxy, country = countryArg }) {
   if (opts.auth && !opts.config) fail('--auth only works together with --config');
   if (opts.config) return [await loadCustom({ forProxy })];
-  return (await selectServers()).slice(0, Math.max(1, Number(opts.tries) || 5));
+  return (await selectServers(country)).slice(0, Math.max(1, Number(opts.tries) || 5));
 }
 
 const countryNames = new Intl.DisplayNames(['en'], { type: 'region' });
@@ -324,36 +333,43 @@ async function reportProxy(port, expectedCountry) {
   return true;
 }
 
-async function cmdProxy() {
+function requireDocker() {
   const status = dockerStatus();
   if (status === 'missing') fail('Proxy mode needs Docker. Install it from https://docs.docker.com/get-docker/');
   if (status === 'stopped') fail('Docker is not running. Start Docker and try again.');
+}
 
+async function cmdProxy() {
+  requireDocker();
   if (countryArg === 'status') return cmdProxyStatus();
   if (countryArg === 'stop') return cmdProxyStop();
+  await launchProxy(countryArg, Number(opts.port) || 1080);
+}
 
+// Starts a proxy for `country` (code or name) on `port` and returns the country code it exits in
+// ("custom" for --config). Exits the process on failure.
+async function launchProxy(country, port) {
   if (opts.via && !['vpngate', 'tor'].includes(opts.via)) fail('--via must be vpngate or tor');
   if (opts.via === 'tor' && opts.config) fail('--via tor and --config cannot be combined');
-  if (opts.via === 'tor' && !countryArg) fail('Tor needs a country, for example: vpngate proxy NL --via tor');
+  if (opts.via === 'tor' && !country) fail('Tor needs a country, for example: vpngate proxy NL --via tor');
 
   // Decide between VPN Gate and Tor before building anything, so a missing country fails fast.
   // Without --via, countries VPN Gate doesn't have fall back to Tor automatically.
   let torCountry = null;
   let candidates = [];
   if (opts.via === 'tor') {
-    torCountry = await resolveTorCountry(countryArg);
-    if (!torCountry) fail(`Tor has no exits in "${countryArg}" right now. Run "vpngate countries" to see what's available.`);
-  } else if (opts.config || !countryArg || opts.via === 'vpngate') {
-    candidates = await candidateServers({ forProxy: true });
-  } else if ((await matchingServers()).length > 0) {
-    candidates = await candidateServers({ forProxy: true });
+    torCountry = await resolveTorCountry(country);
+    if (!torCountry) fail(`Tor has no exits in "${country}" right now. Run "vpngate countries" to see what's available.`);
+  } else if (opts.config || !country || opts.via === 'vpngate') {
+    candidates = await candidateServers({ forProxy: true, country });
+  } else if ((await matchingServers(country)).length > 0) {
+    candidates = await candidateServers({ forProxy: true, country });
   } else {
-    torCountry = await resolveTorCountry(countryArg);
-    if (!torCountry) fail(`"${countryArg}" isn't available on VPN Gate or Tor right now. Run "vpngate countries" to see what's available.`);
+    torCountry = await resolveTorCountry(country);
+    if (!torCountry) fail(`"${country}" isn't available on VPN Gate or Tor right now. Run "vpngate countries" to see what's available.`);
     console.log(dim(`No VPN Gate servers in ${countryName(torCountry)}, using Tor instead.`));
   }
   const tor = torCountry !== null;
-  const port = Number(opts.port) || 1080;
   const kind = tor ? 'tor' : 'openvpn';
   const image = imageTag(kind, version);
   if (!hasImage(image)) {
@@ -371,14 +387,13 @@ async function cmdProxy() {
   });
 
   if (tor) {
-    const country = torCountry;
-    console.log(`Tor · exits in ${countryName(country)} ${dim('(can take up to a minute)')}`);
-    const result = await startTorProxy(country, { image, port, timeoutMs, onLog });
+    console.log(`Tor · exits in ${countryName(torCountry)} ${dim('(can take up to a minute)')}`);
+    const result = await startTorProxy(torCountry, { image, port, timeoutMs, onLog });
     if (!result.ok) fail(result.reason);
-    if (!(await reportProxy(port, country))) {
-      fail(`Tor started but couldn't reach the internet. There may be no Tor exits in ${country} right now.`);
+    if (!(await reportProxy(port, torCountry))) {
+      fail(`Tor started but couldn't reach the internet. There may be no Tor exits in ${torCountry} right now.`);
     }
-    return;
+    return torCountry;
   }
 
   for (const [i, server] of candidates.entries()) {
@@ -389,13 +404,61 @@ async function cmdProxy() {
       console.log(`      ${red('✗')} ${result.reason}`);
       continue;
     }
-    if (await reportProxy(port)) return;
+    if (await reportProxy(port)) return server.countryCode;
   }
   fail(
     opts.config
       ? `Could not connect with ${opts.config}. Run again with -v to see OpenVPN's output.`
       : 'Could not start a proxy on any server. Try another country, --via tor, or --refresh.',
   );
+}
+
+const looksLikeUrl = (s) => /^[a-z]+:\/\//i.test(s) || /^[^\s/]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(s);
+
+// Lowest port from 1080 up that no running vpngate proxy uses.
+function nextFreePort(proxies) {
+  const used = new Set(proxies.map((p) => p.port));
+  let port = 1080;
+  while (used.has(port)) port += 1;
+  return port;
+}
+
+async function cmdBrowser() {
+  const name = (opts.browser ?? 'chrome').toLowerCase();
+  if (!browserNames.includes(name)) fail(`--browser must be one of: ${browserNames.join(', ')}`);
+  let [, country, url] = positionals;
+  if (country && looksLikeUrl(country)) [country, url] = [undefined, country];
+  if (url && !/^[a-z]+:\/\//i.test(url)) url = `https://${url}`;
+
+  requireDocker();
+  const running = listProxies().filter((p) => p.state === 'running');
+  let port;
+  let code;
+  if (!country) {
+    port = Number(opts.port) || 1080;
+    const proxy = running.find((p) => p.port === port);
+    if (!proxy) fail(`No proxy running on port ${port}. Add a country, for example: vpngate browser NL ${url ?? '<url>'}`);
+    code = proxy.country;
+  } else {
+    const q = country.toLowerCase();
+    const reusable =
+      !opts.port &&
+      !opts.config &&
+      !opts.via &&
+      running.find((p) => p.country.toLowerCase() === q || countryName(p.country).toLowerCase().startsWith(q));
+    if (reusable) {
+      ({ port, country: code } = reusable);
+      console.log(dim(`Using the ${countryName(code)} proxy already running on port ${port}`));
+    } else {
+      port = Number(opts.port) || nextFreePort(running);
+      code = await launchProxy(country, port);
+    }
+  }
+
+  await openBrowser(name, { port, country: code, url });
+  console.log(`${green('✓')} Opened ${browserLabel(name)} browsing from ${bold(countryName(code))}${url ? dim(` → ${url}`) : ''}`);
+  console.log(dim('  Only that window uses the proxy. Your normal browser is unaffected.'));
+  console.log(dim(`  When you're done, close the window and run: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
 }
 
 const commands = {
@@ -406,6 +469,7 @@ const commands = {
   ls: cmdList,
   ip: cmdIp,
   proxy: cmdProxy,
+  browser: cmdBrowser,
 };
 
 if (opts.version) console.log(version);

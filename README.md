@@ -19,6 +19,7 @@ It uses the public server list from [VPN Gate](https://www.vpngate.net), an acad
 | **[VPN mode](#vpn-mode)** `vpngate connect JP` | Sends all your computer's traffic through another country | OpenVPN, sudo |
 | **[Proxy mode](#proxy-mode)** `vpngate proxy JP` | A local SOCKS5 proxy in another country. Only the requests you send through it use the VPN. Several countries can run at once. Countries VPN Gate lacks use [Tor](#any-country-with-tor) automatically. | Docker, no sudo |
 | **[Browser](#browse-from-another-country)** `vpngate browser JP <url>` | Opens a separate browser window that browses from another country | Docker, no sudo |
+| **[Check](#check-what-country-a-site-sees)** `vpngate check <url>` | Shows which country a site detects through a proxy | Docker |
 | **[Claude Code plugin](#use-with-claude-code)** | Lets Claude test websites from other countries for you | Docker |
 
 ## Install
@@ -116,6 +117,8 @@ Use `socks5h://` (with the `h`) in curl so DNS is resolved in the VPN country to
 
 The first run builds a small Docker image (Alpine with OpenVPN and the Dante SOCKS server), which takes a few seconds. The proxy only starts after the tunnel is up, so requests never go out over your real connection.
 
+**Proxies recover by themselves.** Free servers drop now and then. When that happens, the proxy switches to the next server in the same country within a few seconds and keeps the same port, so whatever uses it keeps working. During the switch, requests fail rather than going out over your real connection. `vpngate proxy status` marks a proxy that switched with `(switched)`.
+
 ### Any country with Tor
 
 VPN Gate mostly has Japan and Korea. When you ask for a country it doesn't have, such as the Netherlands, proxy mode switches to Tor automatically. Tor has exits in about 50 countries and needs no signup either:
@@ -133,7 +136,9 @@ Tor · exits in Netherlands (can take up to a minute)
       Exit IP 5.255.119.76 (Netherlands)
 ```
 
-Tor takes 20 to 60 seconds to start, is slower than VPN Gate, and more sites block it or show CAPTCHAs. It works well for checking redirects, currency and language. Countries with only a few Tor exits (see `vpngate countries`) may be slow or fail.
+Tor takes 20 to 60 seconds to start, is slower than VPN Gate, and more sites block it or show CAPTCHAs. Countries with only a few Tor exits (see `vpngate countries`) may be slow or fail.
+
+**Many sites can't see Tor's country.** Cloudflare reports every Tor exit as `T1` ("Tor") instead of a country, so sites that rely on Cloudflare's country lookup see no country at all, and their geo features don't change. `vpngate` warns you when this applies. Shopify's own geolocation is an exception and still detects the real country. Use [`vpngate check`](#check-what-country-a-site-sees) to see what a particular site detects.
 
 To choose yourself, use `--via tor` to always use Tor, or `--via vpngate` to never fall back to it.
 
@@ -147,6 +152,35 @@ vpngate connect --config ./nl.ovpn --auth ./login.txt
 ```
 
 `--auth` is only needed when the config asks for a username and password. Put the username on line 1 and the password on line 2. Proxy mode needs certificates inline in the `.ovpn` file, which is how most providers ship them.
+
+## Check what country a site sees
+
+An exit IP in the right country doesn't guarantee the site sees that country. `vpngate check` asks the site:
+
+```bash
+vpngate check https://www.allbirds.com            # through the proxy on port 1080
+vpngate check https://www.allbirds.com --direct   # through your own connection, to compare
+```
+
+```
+$ vpngate check https://www.allbirds.com
+Checking https://www.allbirds.com through the Netherlands proxy on port 1080...
+  Exit IP              192.42.116.16 (IP database: NL)
+  Cloudflare sees      T1 (Tor, no country)
+  Site                 HTTP 200  https://www.allbirds.com/  (Shopify, behind Cloudflare)
+  Site edge sees       T1 (Tor, no country)
+  Shopify geolocation  NL Netherlands
+  Shopify market       US · USD · en-US
+
+  ! Cloudflare sees Tor. Sites that use Cloudflare's country lookup see no country.
+    Shopify's own geolocation still detected NL.
+```
+
+- **Exit IP:** where the proxy's IP is, according to an IP database.
+- **Cloudflare sees / Site edge sees:** the country Cloudflare and the site's own edge detected. `T1` means Tor.
+- **For Shopify stores:** Shopify's own geolocation (used by its Geolocation app) and the active market: country, currency and language.
+
+Run it with `--port` to check a proxy on another port.
 
 ## Browse from another country
 
@@ -188,6 +222,7 @@ For local development with `shopify theme dev`, use the preview link it prints, 
 | Option | What it does |
 | --- | --- |
 | `--port <n>` | Local port for `proxy` (default 1080). `browser` picks a free one. |
+| `--direct` | For `check`: use your own connection instead of a proxy |
 | `--browser <name>` | Browser for `browser`: chrome, brave, edge, chromium or firefox (default chrome) |
 | `--via tor\|vpngate` | For `proxy`: force Tor or VPN Gate (by default, Tor is used only when VPN Gate lacks the country) |
 | `--config <file>` | Use your own `.ovpn` file instead of VPN Gate |

@@ -35,10 +35,10 @@ them automatically and prints "using Tor instead". Tor takes 20-60 seconds to st
 
 **Tor results are often invalid.** Cloudflare reports Tor exits as country `T1`, so any site that
 detects the country through Cloudflare sees no country at all, and geo features silently don't
-trigger. The CLI prints a warning when this applies. When using Tor, first check how the site
-detects the country (for example its geo API response, or a field like `country: null`) and only
-report results if the site actually sees the intended country. Otherwise tell the user Tor can't
-test this site.
+trigger. The CLI prints a warning when this applies. Shopify is an exception for its own
+geolocation, which still detects the real country over Tor. Always run `vpngate check` (step 3)
+and only report results if the site actually sees the intended country. Otherwise tell the user
+Tor can't test this site, and consider simulating the country (step 3).
 
 Tor is also slower and blocked or CAPTCHA'd by more sites than VPN Gate. Countries with only a few
 Tor exits (the "Tor exits" column) may be slow or fail. If a country isn't listed at all, or the
@@ -55,12 +55,23 @@ Only use config and login files the user points you to.
 
 ## 3. Test through the proxy
 
-Always use `socks5h://` (with the `h`) so DNS is resolved in the VPN country too.
+**First, confirm which country the site detects.** An exit IP in the right country is not
+enough, so run this before testing anything else:
 
 ```bash
-# Confirm where you appear to be: exit IP through the proxy, then its country directly
-# (geo services called through Tor report "T1" instead of a country)
-ip=$(curl -s -x socks5h://127.0.0.1:1080 https://api.ipify.org) && curl -s "https://api.country.is/$ip"
+vpngate check https://example.com              # through the proxy on port 1080
+vpngate check https://example.com --port 1081  # another proxy
+vpngate check https://example.com --direct     # the user's own connection, for comparison
+```
+
+It shows the exit IP, what Cloudflare sees, the site's final URL and status and, for Shopify
+stores, Shopify's own geolocation and the active market (country, currency, locale). If the
+site's detected country isn't the one you want, stop and tell the user rather than reporting
+results for the wrong country.
+
+Then test. Always use `socks5h://` (with the `h`) so DNS is resolved in the VPN country too.
+
+```bash
 
 # Redirects and headers (geo-redirects, Vary, Set-Cookie, cache headers)
 curl -sI -L -x socks5h://127.0.0.1:1080 https://example.com
@@ -71,6 +82,25 @@ curl -sL -x socks5h://127.0.0.1:1080 https://example.com | grep -o 'JPY\|¥[0-9,
 
 Start with curl. Redirects, currency and prices in the HTML, and headers are decided on the
 server, so curl usually answers the question and can check several countries in parallel.
+
+### When no real IP is available: simulate the country
+
+If a country has no working proxy, or the site can't see the proxy's country (Tor and
+Cloudflare), you can often still test the site's *reaction* to a country. Many sites decide
+client-side, from a geo API they call (for example `/api/geo-market` returning
+`{"market":"en","country":"NL"}`):
+
+1. Find how the site detects the country. Look at the network requests in the browser, or search
+   its JavaScript for the geo call and the logic that uses it.
+2. Learn the real response format from a country you *can* reach (or `--direct`).
+3. In the browser, intercept that request and answer with the country you want, for example with
+   Playwright: `await page.route('**/api/geo-market', r => r.fulfill({ json: { market: 'en', country: 'NL' } }))`.
+   With `playwright-geo`, use its run-code tool for this.
+4. Clearly label these results as **simulated** in your report, and say which values you assumed.
+
+This only works when the decision happens in the browser. Server-side redirects and prices (such
+as Shopify Markets) can't be simulated this way. Don't fake the visitor's location in other ways,
+such as headers that pretend to come from a CDN.
 
 ### When you need a real browser
 
@@ -126,5 +156,8 @@ Always stop the proxies you started before finishing the task, even if the test 
   than calling it a regression.
 - **The servers are run by unknown volunteers.** Never send credentials, API keys, session
   cookies or personal data through the proxy. Testing public pages is fine.
-- Servers can drop. If requests start failing, check `vpngate proxy status` and start a new proxy.
+- Servers can drop. A VPN Gate proxy switches to the next server by itself after a few seconds,
+  on the same port, and requests fail (never leak) during the switch. `vpngate proxy status` shows
+  `(switched)` when this happened. Re-run `vpngate check` after a switch, and if the proxy is gone
+  start a new one.
 - Run `vpngate proxy JP -v` to see OpenVPN output when a connection keeps failing.

@@ -33,7 +33,14 @@ country. It takes 5-30 seconds.
 **Countries marked `(Tor)`** have no VPN Gate servers. `vpngate proxy <country>` uses Tor for
 them automatically and prints "using Tor instead". Tor takes 20-60 seconds to start.
 
-Tor is slower and blocked or CAPTCHA'd by more sites than VPN Gate. Countries with only a few
+**Tor results are often invalid.** Cloudflare reports Tor exits as country `T1`, so any site that
+detects the country through Cloudflare sees no country at all, and geo features silently don't
+trigger. The CLI prints a warning when this applies. When using Tor, first check how the site
+detects the country (for example its geo API response, or a field like `country: null`) and only
+report results if the site actually sees the intended country. Otherwise tell the user Tor can't
+test this site.
+
+Tor is also slower and blocked or CAPTCHA'd by more sites than VPN Gate. Countries with only a few
 Tor exits (the "Tor exits" column) may be slow or fail. If a country isn't listed at all, or the
 proxy fails, tell the user. Do not substitute another country silently.
 

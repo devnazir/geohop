@@ -106,7 +106,8 @@ export async function checkProxy(port) {
       country = undefined;
     }
   }
-  return { ip: trace.ip, country };
+  // `cloudflareSeesTor`: sites that geolocate with Cloudflare see no country for this exit.
+  return { ip: trace.ip, country, cloudflareSeesTor: trace.loc === 'T1' };
 }
 
 export function listProxies() {

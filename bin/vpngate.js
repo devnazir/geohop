@@ -207,6 +207,7 @@ async function cmdCountries() {
   console.log(table(['Code', 'Country', 'Servers', 'Fastest', 'Tor exits'], rows));
   if (torExits) {
     console.log(dim(`\n(Tor) countries work with proxy mode only and use Tor automatically: vpngate proxy <code>`));
+    console.log(dim(`Sites that detect country through Cloudflare can't see Tor's country, so geo tests may not work there.`));
   } else {
     console.error(yellow('\n! Could not load the Tor exit list, showing VPN Gate countries only'));
   }
@@ -316,6 +317,16 @@ function cmdProxyStop() {
 }
 
 // Verifies the proxy end to end and prints how to use it. Returns false if it doesn't work.
+// Many sites geolocate visitors with Cloudflare, which reports Tor exits as "T1" instead of a
+// country, so geo features silently don't trigger. Found on urbanarrow.com: country = null.
+const TOR_GEO_WARNING = [
+  '! Tor: Cloudflare sees this exit as "T1" (Tor), not a country.',
+  '  Sites that use Cloudflare to detect the country will see no country, so',
+  '  geo redirects, banners and prices may not change. Check the site\'s own geo',
+  '  detection before trusting results, or use a VPN Gate country or --config.',
+];
+const warnTor = () => console.log(yellow(TOR_GEO_WARNING.map((l) => `      ${l}`).join('\n')));
+
 async function reportProxy(port, expectedCountry) {
   const exit = await checkProxy(port);
   if (!exit) {
@@ -328,6 +339,7 @@ async function reportProxy(port, expectedCountry) {
   if (expectedCountry && exit.country && exit.country !== expectedCountry) {
     console.log(yellow(`      ! Expected ${expectedCountry} but the exit is in ${exit.country}`));
   }
+  if (exit.cloudflareSeesTor) warnTor();
   console.log(dim(`      curl -x socks5h://127.0.0.1:${port} https://example.com`));
   console.log(dim(`      Stop it with: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
   return true;
@@ -439,6 +451,7 @@ async function cmdBrowser() {
     const proxy = running.find((p) => p.port === port);
     if (!proxy) fail(`No proxy running on port ${port}. Add a country, for example: vpngate browser NL ${url ?? '<url>'}`);
     code = proxy.country;
+    if (proxy.server === 'tor') warnTor();
   } else {
     const q = country.toLowerCase();
     const reusable =
@@ -449,6 +462,7 @@ async function cmdBrowser() {
     if (reusable) {
       ({ port, country: code } = reusable);
       console.log(dim(`Using the ${countryName(code)} proxy already running on port ${port}`));
+      if (reusable.server === 'tor') warnTor();
     } else {
       port = Number(opts.port) || nextFreePort(running);
       code = await launchProxy(country, port);

@@ -17,7 +17,7 @@ It uses the public server list from [VPN Gate](https://www.vpngate.net), an acad
 | | What it does | Needs |
 | --- | --- | --- |
 | **[VPN mode](#vpn-mode)** `vpngate connect JP` | Sends all your computer's traffic through another country | OpenVPN, sudo |
-| **[Proxy mode](#proxy-mode)** `vpngate proxy JP` | A local SOCKS5 proxy in another country. Only the requests you send through it use the VPN. Several countries can run at once. | Docker, no sudo |
+| **[Proxy mode](#proxy-mode)** `vpngate proxy JP` | A local SOCKS5 proxy in another country. Only the requests you send through it use the VPN. Several countries can run at once. Any country via [Tor](#any-country-with-tor). | Docker, no sudo |
 | **[Claude Code plugin](#use-with-claude-code)** | Lets Claude test websites from other countries for you | Docker |
 
 ## Install
@@ -103,14 +103,46 @@ Use `socks5h://` (with the `h`) in curl so DNS is resolved in the VPN country to
 
 The first run builds a small Docker image (Alpine with OpenVPN and the Dante SOCKS server), which takes a few seconds. The proxy only starts after the tunnel is up, so requests never go out over your real connection.
 
+### Any country with Tor
+
+VPN Gate mostly has Japan and Korea. For other countries, such as the Netherlands, use Tor, which has exits in most countries and needs no signup either:
+
+```bash
+vpngate proxy NL --via tor                # Tor with Dutch exits only
+vpngate proxy DE --via tor --port 1081    # Germany at the same time
+```
+
+```
+$ vpngate proxy NL --via tor
+Tor · exits in Netherlands (can take up to a minute)
+      ✓ Proxy ready  socks5://127.0.0.1:1080
+      Exit IP 45.66.35.46 (Netherlands)
+```
+
+Tor needs a two-letter country code. It takes 20 to 60 seconds to start, is slower than VPN Gate, and more sites block it or show CAPTCHAs. It works well for checking redirects, currency and language.
+
+### Your own OpenVPN config
+
+Have a `.ovpn` file from your own server or a VPN provider, such as [Proton VPN Free](https://protonvpn.com/free-vpn), which has Netherlands servers? Use it with either mode:
+
+```bash
+vpngate proxy --config ./nl.ovpn --auth ./login.txt
+vpngate connect --config ./nl.ovpn --auth ./login.txt
+```
+
+`--auth` is only needed when the config asks for a username and password. Put the username on line 1 and the password on line 2. Proxy mode needs certificates inline in the `.ovpn` file, which is how most providers ship them.
+
 ## Options
 
 | Option | What it does |
 | --- | --- |
 | `--port <n>` | Local port for `proxy` (default 1080) |
+| `--via tor` | For `proxy`: exit through Tor in any country |
+| `--config <file>` | Use your own `.ovpn` file instead of VPN Gate |
+| `--auth <file>` | Username and password for `--config` (line 1 and line 2) |
 | `--proto tcp\|udp` | Only use servers with this protocol (almost all are TCP) |
 | `--tries <n>` | How many servers to try before giving up (default 5) |
-| `--timeout <sec>` | How long to wait for each server (default 20) |
+| `--timeout <sec>` | How long to wait for each server (default 20, Tor 90) |
 | `--limit <n>` | Rows shown by `list` (default 20) |
 | `--refresh` | Fetch a fresh server list (it's cached for 10 minutes) |
 | `-v, --verbose` | Show OpenVPN's output, useful when connections keep failing |
@@ -138,6 +170,7 @@ The OpenVPN software is secure. **The servers are run by volunteers you don't kn
 
 - ✅ Fine for: browsing HTTPS sites, region-locked content, testing public pages.
 - ❌ Not for: banking, important logins, or anything where you need real privacy or anonymity.
+- Tor exits are also run by volunteers, with the same rules: only use HTTPS and don't log in to anything important.
 - The server operator can see which sites you visit and anything not using HTTPS. VPN Gate also keeps connection logs.
 - If your browser shows a **certificate warning while connected, disconnect**.
 - In VPN mode on macOS, DNS lookups may not go through the VPN. Turn on DNS over HTTPS in your browser for better privacy. Proxy mode doesn't have this problem.
@@ -145,7 +178,7 @@ The OpenVPN software is secure. **The servers are run by volunteers you don't kn
 ## Limits
 
 - No data cap or time limit, but speed depends on the volunteer server.
-- Most servers are in Japan and Korea. Other countries come and go; check `vpngate countries`.
+- Most VPN Gate servers are in Japan and Korea. Other countries come and go; check `vpngate countries`, or use `--via tor`.
 - Servers can disappear at any time. Just run the command again to get another one.
 - VPN Gate IPs are shared by many people, so some sites block them or show CAPTCHAs, and most streaming services won't work.
 

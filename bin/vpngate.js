@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { bold, cyan, dim, green, mbps, red, table, yellow } from '../src/format.js';
 import { filterServers, getServers, groupByCountry } from '../src/servers.js';
+import { getTorExitCounts } from '../src/tor.js';
 import { loadCustomConfig } from '../src/custom.js';
 import {
   buildImage,
@@ -154,8 +155,32 @@ const describe = (s) =>
   `${s.country} · ${s.host} ${dim(`${s.ip} ${s.proto}/${s.port}${s.speed ? ` · ${mbps(s.speed)}` : ''}`)}`;
 
 async function cmdCountries() {
-  const rows = groupByCountry(await loadServers()).map((g) => [cyan(g.code), g.name, g.count, mbps(g.bestSpeed)]);
-  console.log(table(['Code', 'Country', 'Servers', 'Fastest'], rows));
+  const [groups, torExits] = await Promise.all([
+    loadServers().then(groupByCountry),
+    getTorExitCounts({ refresh: opts.refresh }),
+  ]);
+  const rows = groups.map((g) => [
+    cyan(g.code),
+    countryName(g.code),
+    g.count,
+    mbps(g.bestSpeed),
+    torExits?.get(g.code) ?? '-',
+  ]);
+  // Countries only reachable through Tor, most exits first.
+  const vpngateCodes = new Set(groups.map((g) => g.code));
+  const torOnly = [...(torExits ?? [])]
+    .filter(([code]) => !vpngateCodes.has(code))
+    .sort((a, b) => b[1] - a[1]);
+  for (const [code, exits] of torOnly) {
+    rows.push([cyan(code), `${countryName(code)} ${yellow('(Tor)')}`, '-', '-', exits]);
+  }
+
+  console.log(table(['Code', 'Country', 'Servers', 'Fastest', 'Tor exits'], rows));
+  if (torExits) {
+    console.log(dim(`\n(Tor) countries work with proxy mode only: vpngate proxy <code> --via tor`));
+  } else {
+    console.error(yellow('\n! Could not load the Tor exit list, showing VPN Gate countries only'));
+  }
 }
 
 async function cmdList() {

@@ -61,6 +61,18 @@ vpngate list JP              # servers in Japan, best first
 vpngate ip                   # your current public IP and country
 ```
 
+`vpngate countries` lists VPN Gate and Tor together. Countries marked **(Tor)** have no VPN Gate servers right now and work with [`--via tor`](#any-country-with-tor):
+
+```
+Code  Country            Servers  Fastest   Tor exits
+JP    Japan              53       932 Mbps  4
+KR    South Korea        34       895 Mbps  2
+US    United States      3        391 Mbps  1008
+NL    Netherlands (Tor)  -        -         613
+DE    Germany (Tor)      -        -         342
+...
+```
+
 Countries can be a code (`JP`) or the start of a name (`japan`).
 
 ## VPN mode

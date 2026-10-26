@@ -1,6 +1,6 @@
 {
   "name": "vpngate-cli",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Free, no-signup VPN from your terminal, powered by the VPN Gate volunteer network",
   "type": "module",
   "bin": {

@@ -5,11 +5,13 @@ import { bold, cyan, dim, green, mbps, red, table, yellow } from '../src/format.
 import { filterServers, getServers, groupByCountry } from '../src/servers.js';
 import { getTorExitCounts } from '../src/tor.js';
 import { browserLabel, browserNames, openBrowser } from '../src/browser.js';
+import { checkSite } from '../src/check.js';
 import { loadCustomConfig } from '../src/custom.js';
 import {
   buildImage,
   checkProxy,
   containerName,
+  currentServer,
   dockerStatus,
   hasImage,
   imageTag,
@@ -42,6 +44,9 @@ ${bold('Usage')}
   vpngate proxy status        List running proxies
   vpngate proxy stop          Stop proxies (all, or the one on --port)
 
+  vpngate check <url>         Show which country a site detects through the proxy on --port
+                              (default 1080), or with --direct, through your own connection
+
   vpngate browser [country] [url]
                               Open a separate browser window that browses from a country.
                               Starts (or reuses) a proxy for it. Without a country, uses the
@@ -70,6 +75,7 @@ ${bold('Examples')}
   vpngate proxy NL                (no VPN Gate servers, so this uses Tor)
   vpngate proxy --config ./nl.ovpn --auth ./nl-login.txt
   vpngate browser NL https://example.myshopify.com/?preview_theme_id=123
+  vpngate check https://example.com
 
 Country can be a code (JP) or the start of a name (japan).
 Servers are run by volunteers via VPN Gate (https://www.vpngate.net).
@@ -94,6 +100,7 @@ try {
       limit: { type: 'string', default: '20' },
       port: { type: 'string' },
       browser: { type: 'string' },
+      direct: { type: 'boolean', default: false },
       refresh: { type: 'boolean', default: false },
       verbose: { type: 'boolean', short: 'v', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -297,13 +304,18 @@ async function cmdConnect() {
 function cmdProxyStatus() {
   const proxies = listProxies();
   if (proxies.length === 0) return console.log('No proxies running.');
-  const rows = proxies.map((p) => [
+  const rows = proxies.map((p) => {
+    const started = `${p.server} ${p.ip}`.trim();
+    const current = p.state === 'running' && p.server !== 'tor' ? currentServer(p.name) : null;
+    const server = current && current !== started ? `${current} ${yellow('(switched)')}` : `${p.server} ${dim(p.ip)}`;
+    return [
     `socks5://127.0.0.1:${p.port}`,
     cyan(p.country),
-    `${p.server} ${dim(p.ip)}`,
+    server,
     p.state === 'running' ? green('running') : red(p.state),
     p.age,
-  ]);
+  ];
+  });
   console.log(table(['Proxy', 'CC', 'Server', 'State', 'Started'], rows));
 }
 
@@ -328,7 +340,12 @@ const TOR_GEO_WARNING = [
 const warnTor = () => console.log(yellow(TOR_GEO_WARNING.map((l) => `      ${l}`).join('\n')));
 
 async function reportProxy(port, expectedCountry) {
-  const exit = await checkProxy(port);
+  // Slow servers sometimes miss the first check even though the tunnel works.
+  let exit = null;
+  for (let attempt = 1; attempt <= 3 && !exit; attempt++) {
+    if (attempt > 1) await new Promise((r) => setTimeout(r, 3000));
+    exit = await checkProxy(port);
+  }
   if (!exit) {
     removeProxy(containerName(port));
     console.log(`      ${red('✗')} tunnel is up but the proxy is not reachable`);
@@ -410,7 +427,9 @@ async function launchProxy(country, port) {
 
   for (const [i, server] of candidates.entries()) {
     console.log(`${dim(`[${i + 1}/${candidates.length}]`)} ${describe(server)}`);
-    const result = await startProxy(server, { image, port, timeoutMs, onLog });
+    // Servers not tried yet become fallbacks the proxy switches to if this one drops later.
+    const fallbacks = candidates.slice(i + 1);
+    const result = await startProxy(server, { image, port, timeoutMs, onLog, fallbacks });
     if (!result.ok) {
       if (result.fatal) fail(result.reason);
       console.log(`      ${red('✗')} ${result.reason}`);
@@ -475,6 +494,55 @@ async function cmdBrowser() {
   console.log(dim(`  When you're done, close the window and run: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
 }
 
+async function cmdCheck() {
+  let url = positionals[1];
+  if (!url) fail('Give a URL, for example: vpngate check https://example.com');
+  if (!/^[a-z]+:\/\//i.test(url)) url = `https://${url}`;
+
+  let port = null;
+  let via = 'your own connection';
+  if (!opts.direct) {
+    requireDocker();
+    port = Number(opts.port) || 1080;
+    const proxy = listProxies().find((p) => p.port === port && p.state === 'running');
+    if (!proxy) fail(`No proxy running on port ${port}. Start one (vpngate proxy NL) or use --direct.`);
+    via = `the ${countryName(proxy.country)} proxy on port ${port}`;
+  }
+  console.log(dim(`Checking ${url} through ${via}...`));
+  const r = await checkSite(url, { port });
+
+  const row = (label, value) => console.log(`  ${label.padEnd(20)} ${value}`);
+  const country = (code) => (code ? `${bold(code)} ${dim(countryName(code))}` : dim('none'));
+  if (r.exitIp) row('Exit IP', `${r.exitIp} ${dim(`(IP database: ${r.ipCountry ?? '?'})`)}`);
+  row('Cloudflare sees', r.cloudflareCountry === 'T1' ? `${bold('T1')} ${dim('(Tor, no country)')}` : country(r.cloudflareCountry));
+  if (r.error) {
+    row('Site', red(`didn't load: ${r.error}`));
+    if (port) console.log(dim('  Slow free servers and Tor often time out. Try again, or another server.'));
+    process.exit(1);
+  }
+  const platform = [r.shopify && 'Shopify', r.cloudflare && 'behind Cloudflare'].filter(Boolean).join(', ');
+  row('Site', `HTTP ${r.status}  ${r.finalUrl}${platform ? dim(`  (${platform})`) : ''}`);
+  if (r.edgeCountry) row('Site edge sees', r.edgeCountry === 'T1' ? `${bold('T1')} ${dim('(Tor, no country)')}` : country(r.edgeCountry));
+  if (r.shopify) {
+    row('Shopify geolocation', country(r.shopifyGeolocation));
+    const m = r.market ?? {};
+    row('Shopify market', [m.country, m.currency, m.locale].map((v) => v ?? '?').join(' · '));
+  }
+
+  // The country the site's own detection reports, most specific first.
+  const detected = r.shopifyGeolocation ?? r.edgeCountry ?? r.cloudflareCountry;
+  if (r.cloudflareCountry === 'T1') {
+    console.log(yellow(`\n  ! Cloudflare sees Tor. Sites that use Cloudflare's country lookup see no country.`));
+    if (r.shopifyGeolocation) console.log(yellow(`    Shopify's own geolocation still detected ${r.shopifyGeolocation}.`));
+  } else if (r.ipCountry && detected && detected !== r.ipCountry) {
+    console.log(yellow(`\n  ! The site detects ${detected}, but the exit IP is in ${r.ipCountry}.`));
+  }
+  if (r.shopify && r.market?.country && detected && r.market.country !== detected) {
+    console.log(dim(`  Note: the Shopify market (${r.market.country}) differs from the detected country (${detected}).`));
+    console.log(dim('  That can be the store\'s setup, for example a domain that always uses one market.'));
+  }
+}
+
 const commands = {
   connect: cmdConnect,
   c: cmdConnect,
@@ -484,6 +552,7 @@ const commands = {
   ip: cmdIp,
   proxy: cmdProxy,
   browser: cmdBrowser,
+  check: cmdCheck,
 };
 
 if (opts.version) console.log(version);

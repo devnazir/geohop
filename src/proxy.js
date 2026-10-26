@@ -54,8 +54,15 @@ function runProxy({ port, image, labels, args = [], ready, fatal, timeoutMs, onL
   );
 }
 
-export function startProxy(server, { image, port, timeoutMs, onLog }) {
-  const config = Buffer.from(withCipherFallback(server.config)).toString('base64');
+const serverName = (s) => `${s.host} ${s.ip}`;
+
+// `fallbacks` are servers the container switches to, in order, if `server` drops later on.
+export function startProxy(server, { image, port, timeoutMs, onLog, fallbacks = [] }) {
+  const servers = [server, ...fallbacks];
+  const env = servers.flatMap((s, i) => [
+    '-e', `VPN_CONFIG_${i}=${Buffer.from(withCipherFallback(s.config)).toString('base64')}`,
+    '-e', `VPN_NAME_${i}=${serverName(s)}`,
+  ]);
   return runProxy({
     port,
     image,
@@ -68,7 +75,8 @@ export function startProxy(server, { image, port, timeoutMs, onLog }) {
       // Public resolvers are reached through the tunnel, so DNS also resolves from the VPN's country.
       '--dns', '1.1.1.1',
       '--dns', '8.8.8.8',
-      '-e', `VPN_CONFIG=${config}`,
+      '-e', `VPN_COUNT=${servers.length}`,
+      ...env,
     ],
   });
 }
@@ -80,7 +88,8 @@ export function startTorProxy(countryCode, { image, port, timeoutMs, onLog }) {
     timeoutMs,
     onLog,
     labels: { 'vpngate.country': countryCode, 'vpngate.server': 'tor', 'vpngate.ip': '' },
-    args: ['-e', `TOR_COUNTRY=${countryCode.toLowerCase()}`],
+    // Tor heals its own circuits; restarting covers the rare crash.
+    args: ['--restart', 'on-failure', '-e', `TOR_COUNTRY=${countryCode.toLowerCase()}`],
     ready: /Bootstrapped 100%/,
     fatal: /\[err\]/,
   });
@@ -108,6 +117,12 @@ export async function checkProxy(port) {
   }
   // `cloudflareSeesTor`: sites that geolocate with Cloudflare see no country for this exit.
   return { ip: trace.ip, country, cloudflareSeesTor: trace.loc === 'T1' };
+}
+
+// The server an OpenVPN proxy is using right now, which changes after a switch. Null for Tor.
+export function currentServer(name) {
+  const res = docker(['exec', name, 'cat', '/vpn/current']);
+  return res.status === 0 ? res.stdout.trim() : null;
 }
 
 export function listProxies() {

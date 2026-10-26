@@ -1,0 +1,25 @@
+{
+  "name": "vpngate-cli",
+  "version": "0.1.0",
+  "description": "Free, no-signup VPN from your terminal, powered by the VPN Gate volunteer network",
+  "type": "module",
+  "bin": {
+    "vpngate": "bin/vpngate.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "vpn",
+    "vpngate",
+    "openvpn",
+    "cli",
+    "free-vpn"
+  ],
+  "author": "devnazir",
+  "license": "MIT"
+}

@@ -27,12 +27,14 @@ export function authorizeSudo() {
   return status === 0;
 }
 
+// OpenVPN 2.6+ rejects the legacy CBC cipher many VPN Gate servers use unless it is allowed.
+export const withCipherFallback = (config) =>
+  /^\s*data-ciphers\s/m.test(config) ? config : `${config}\ndata-ciphers ${FALLBACK_CIPHERS}\n`;
+
 export async function writeConfig(server) {
   const dir = await mkdtemp(join(tmpdir(), 'vpngate-'));
   const file = join(dir, 'config.ovpn');
-  // OpenVPN 2.6+ rejects the legacy CBC cipher many VPN Gate servers use unless it is allowed.
-  const extra = /^\s*data-ciphers\s/m.test(server.config) ? '' : `\ndata-ciphers ${FALLBACK_CIPHERS}\n`;
-  await writeFile(file, server.config + extra, { mode: 0o600 });
+  await writeFile(file, withCipherFallback(server.config), { mode: 0o600 });
   return { file, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
@@ -42,7 +44,12 @@ export function startTunnel(openvpnPath, configFile, { sudo, timeoutMs, onLog })
   const ovpnArgs = [openvpnPath, '--config', configFile, '--connect-retry-max', '1'];
   const [cmd, ...args] = sudo ? ['sudo', '-n', ...ovpnArgs] : ovpnArgs;
   const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  return watchTunnel(child, { timeoutMs, onLog });
+}
 
+// Follows OpenVPN output from `child` (openvpn itself, or `docker logs -f`) until the tunnel is up.
+// `stop` must make `child` exit; it is called on timeout.
+export function watchTunnel(child, { timeoutMs, onLog, stop = () => child.kill('SIGTERM') }) {
   return new Promise((resolve) => {
     let settled = false;
     let timedOut = false;
@@ -56,13 +63,13 @@ export function startTunnel(openvpnPath, configFile, { sudo, timeoutMs, onLog })
     // Settles via the exit handler below, so the caller never races a still-running openvpn.
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
+      stop();
     }, timeoutMs);
 
     const onLine = (line) => {
       onLog?.(line);
       if (line.includes('Initialization Sequence Completed')) settle({ ok: true, child });
-      else if (FATAL.test(line)) lastError = line.replace(/^.*?\d{2}:\d{2}:\d{2} \d{4} /, '');
+      else if (FATAL.test(line)) lastError = line.replace(/^.*?\d{2}:\d{2}:\d{2}( \d{4})? /, '');
     };
     createInterface({ input: child.stdout }).on('line', onLine);
     createInterface({ input: child.stderr }).on('line', onLine);

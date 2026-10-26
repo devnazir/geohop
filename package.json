@@ -1,6 +1,6 @@
 {
   "name": "vpngate-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Free, no-signup VPN from your terminal, powered by the VPN Gate volunteer network",
   "type": "module",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "docker"
   ],
   "engines": {
     "node": ">=18"

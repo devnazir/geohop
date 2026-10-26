@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { bold, cyan, dim, green, mbps, red, table, yellow } from '../src/format.js';
 import { filterServers, getServers, groupByCountry } from '../src/servers.js';
+import { buildImage, checkProxy, containerName, dockerStatus, hasImage, listProxies, removeProxy, startProxy } from '../src/proxy.js';
 import {
   authorizeSudo,
   findOpenVPN,
@@ -23,11 +24,16 @@ ${bold('Usage')}
   vpngate list [country]      List servers, best first
   vpngate ip                  Show your current public IP and location
 
+  vpngate proxy [country]     Start a SOCKS5 proxy that exits in a country (needs Docker, no sudo)
+  vpngate proxy status        List running proxies
+  vpngate proxy stop          Stop proxies (all, or the one on --port)
+
 ${bold('Options')}
   --proto <tcp|udp>   Only use servers with this protocol
   --tries <n>         Servers to try before giving up (default 5)
   --timeout <sec>     Seconds to wait for each server (default 20)
   --limit <n>         Rows to show in "list" (default 20)
+  --port <n>          Local port for "proxy" (default 1080)
   --refresh           Ignore the cached server list
   -v, --verbose       Show OpenVPN output
   -h, --help          Show this help
@@ -36,6 +42,7 @@ ${bold('Examples')}
   vpngate connect JP
   vpngate connect korea --proto udp
   vpngate list US
+  vpngate proxy JP && curl -x socks5h://127.0.0.1:1080 https://example.com
 
 Country can be a code (JP) or the start of a name (japan).
 Servers are run by volunteers via VPN Gate (https://www.vpngate.net).
@@ -55,6 +62,7 @@ try {
       tries: { type: 'string', default: '5' },
       timeout: { type: 'string', default: '20' },
       limit: { type: 'string', default: '20' },
+      port: { type: 'string' },
       refresh: { type: 'boolean', default: false },
       verbose: { type: 'boolean', short: 'v', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -82,10 +90,21 @@ async function selectServers() {
   return servers;
 }
 
+const countryNames = new Intl.DisplayNames(['en'], { type: 'region' });
+const countryName = (code) => {
+  try {
+    return countryNames.of(code);
+  } catch {
+    return code;
+  }
+};
+
+// Cloudflare's trace endpoint has no rate limit, unlike most IP APIs, which matters on shared VPN IPs.
 async function lookupIp() {
   try {
-    const res = await fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(8_000) });
-    return await res.json();
+    const res = await fetch('https://www.cloudflare.com/cdn-cgi/trace', { signal: AbortSignal.timeout(8_000) });
+    const trace = Object.fromEntries((await res.text()).split('\n').map((l) => l.split('=')));
+    return { ip: trace.ip, country: trace.loc };
   } catch {
     return null;
   }
@@ -117,7 +136,7 @@ async function cmdList() {
 async function cmdIp() {
   const info = await lookupIp();
   if (!info?.ip) fail('Could not look up your IP');
-  console.log(`${bold(info.ip)}  ${[info.city, info.region, info.country].filter(Boolean).join(', ')}  ${dim(info.org ?? '')}`);
+  console.log(`${bold(info.ip)}  ${countryName(info.country)}`);
 }
 
 async function cmdConnect() {
@@ -162,7 +181,7 @@ async function cmdConnect() {
       current = result.child;
       console.log(`      ${green('✓ Connected')}`);
       const info = await lookupIp();
-      if (info?.ip) console.log(`      Your IP is now ${bold(info.ip)} (${[info.city, info.country].filter(Boolean).join(', ')})`);
+      if (info?.ip) console.log(`      Your IP is now ${bold(info.ip)} (${countryName(info.country)})`);
       console.log(dim('      Press Ctrl+C to disconnect'));
       await waitForExit(current);
       current = null;
@@ -179,6 +198,76 @@ async function cmdConnect() {
   fail('Could not connect to any server. Try another country, --proto tcp, or --refresh.');
 }
 
+function cmdProxyStatus() {
+  const proxies = listProxies();
+  if (proxies.length === 0) return console.log('No proxies running.');
+  const rows = proxies.map((p) => [
+    `socks5://127.0.0.1:${p.port}`,
+    cyan(p.country),
+    `${p.server} ${dim(p.ip)}`,
+    p.state === 'running' ? green('running') : red(p.state),
+    p.age,
+  ]);
+  console.log(table(['Proxy', 'CC', 'Server', 'State', 'Started'], rows));
+}
+
+function cmdProxyStop() {
+  const proxies = listProxies().filter((p) => !opts.port || p.port === Number(opts.port));
+  for (const p of proxies) {
+    removeProxy(p.name);
+    console.log(`Stopped proxy on port ${p.port} (${p.country})`);
+  }
+  if (proxies.length === 0) console.log('No proxies to stop.');
+}
+
+async function cmdProxy() {
+  const status = dockerStatus();
+  if (status === 'missing') fail('Proxy mode needs Docker. Install it from https://docs.docker.com/get-docker/');
+  if (status === 'stopped') fail('Docker is not running. Start Docker and try again.');
+
+  if (countryArg === 'status') return cmdProxyStatus();
+  if (countryArg === 'stop') return cmdProxyStop();
+
+  const port = Number(opts.port) || 1080;
+  const image = `vpngate-proxy:${version}`;
+  if (!hasImage(image)) {
+    console.log(dim('Building the proxy image (first run only)...'));
+    buildImage(image);
+  }
+
+  const candidates = (await selectServers()).slice(0, Math.max(1, Number(opts.tries) || 5));
+  const timeoutMs = (Number(opts.timeout) || 20) * 1000;
+  const onLog = opts.verbose ? (line) => console.log(dim(`  ${line}`)) : undefined;
+
+  // A half-started container would otherwise keep running after Ctrl+C.
+  process.on('SIGINT', () => {
+    removeProxy(containerName(port));
+    process.exit(130);
+  });
+
+  for (const [i, server] of candidates.entries()) {
+    console.log(`${dim(`[${i + 1}/${candidates.length}]`)} ${describe(server)}`);
+    const result = await startProxy(server, { image, port, timeoutMs, onLog });
+    if (!result.ok) {
+      if (result.fatal) fail(result.reason);
+      console.log(`      ${red('✗')} ${result.reason}`);
+      continue;
+    }
+    const exit = checkProxy(port);
+    if (!exit) {
+      removeProxy(containerName(port));
+      console.log(`      ${red('✗')} tunnel is up but the proxy is not reachable`);
+      continue;
+    }
+    console.log(`      ${green('✓ Proxy ready')}  ${bold(`socks5://127.0.0.1:${port}`)}`);
+    if (exit.ip) console.log(`      Exit IP ${bold(exit.ip)} (${countryName(exit.country)})`);
+    console.log(dim(`      curl -x socks5h://127.0.0.1:${port} https://example.com`));
+    console.log(dim(`      Stop it with: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
+    return;
+  }
+  fail('Could not start a proxy on any server. Try another country, or --refresh.');
+}
+
 const commands = {
   connect: cmdConnect,
   c: cmdConnect,
@@ -186,6 +275,7 @@ const commands = {
   list: cmdList,
   ls: cmdList,
   ip: cmdIp,
+  proxy: cmdProxy,
 };
 
 if (opts.version) console.log(version);

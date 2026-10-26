@@ -1,0 +1,12 @@
+{
+  "name": "vpngate",
+  "displayName": "VPN Gate Region Testing",
+  "version": "0.2.0",
+  "description": "Lets Claude test websites and APIs from other countries through free VPN Gate proxies. No signup, no sudo, needs Docker.",
+  "author": {
+    "name": "devnazir"
+  },
+  "repository": "https://github.com/devnazir/vpngate-cli",
+  "license": "MIT",
+  "keywords": ["vpn", "geo-testing", "proxy", "region", "localization"]
+}

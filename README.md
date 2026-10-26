@@ -6,7 +6,7 @@ Free VPN from your terminal. No signup, no account, multiple countries.
 $ vpngate connect JP
 [1/5] Japan · public-vpn-187 219.100.37.179 tcp/443 · 221 Mbps
       ✓ Connected
-      Your IP is now 219.100.37.179 (Tokyo, JP)
+      Your IP is now 219.100.37.179 (Japan)
       Press Ctrl+C to disconnect
 ```
 
@@ -68,6 +68,50 @@ You'll be asked for your password once, because creating a VPN tunnel needs admi
 | `--limit <n>` | Rows shown by `list` (default 20) |
 | `--refresh` | Fetch a fresh server list (it's cached for 10 minutes) |
 | `-v, --verbose` | Show OpenVPN's output |
+
+## Proxy mode (no sudo, multiple countries at once)
+
+`vpngate proxy` runs the VPN inside a Docker container and gives you a local SOCKS5 proxy. Only requests you send through the proxy use the VPN, and the rest of your computer stays on your normal connection. You need [Docker](https://docs.docker.com/get-docker/), but not sudo or OpenVPN.
+
+```bash
+vpngate proxy JP                  # socks5://127.0.0.1:1080 exits in Japan
+vpngate proxy KR --port 1081      # Korea at the same time on another port
+vpngate proxy status              # list running proxies
+vpngate proxy stop                # stop all (or --port 1081 for one)
+```
+
+```
+$ vpngate proxy JP
+[1/5] Japan · public-vpn-202 219.100.37.197 tcp/443 · 161 Mbps
+      ✓ Proxy ready  socks5://127.0.0.1:1080
+      Exit IP 219.100.37.245 (Japan)
+```
+
+Use it with anything that supports SOCKS5:
+
+```bash
+curl -x socks5h://127.0.0.1:1080 https://example.com
+chromium --proxy-server=socks5://127.0.0.1:1080
+```
+
+The first run builds a small Docker image (Alpine with OpenVPN and the Dante SOCKS server), which takes a few seconds. The proxy only starts after the tunnel is up, and DNS goes through the tunnel too, so requests never go out over your real connection.
+
+## Use with Claude Code
+
+This repo is also a Claude Code plugin. It teaches Claude to test websites from other countries, for example *"check whether the store redirects visitors from Japan"*. Install it from inside Claude Code:
+
+```
+/plugin install vpngate --marketplace devnazir/vpngate-cli
+```
+
+On older Claude Code versions:
+
+```
+/plugin marketplace add devnazir/vpngate-cli
+/plugin install vpngate@vpngate
+```
+
+The plugin includes the CLI, so you only need Node.js 18+ and Docker. Claude starts a proxy for the country, tests through it with curl or a Playwright browser, and stops the proxy when it's done. The instructions it follows are in [`skills/region-test/SKILL.md`](skills/region-test/SKILL.md).
 
 ## Is it safe?
 

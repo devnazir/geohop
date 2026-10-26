@@ -1,0 +1,15 @@
+{
+  "name": "vpngate",
+  "description": "Free region testing for Claude Code, powered by VPN Gate.",
+  "owner": {
+    "name": "devnazir",
+    "url": "https://github.com/devnazir"
+  },
+  "plugins": [
+    {
+      "name": "vpngate",
+      "source": "./",
+      "description": "Test websites and APIs from other countries through free VPN Gate proxies. Needs Docker."
+    }
+  ]
+}

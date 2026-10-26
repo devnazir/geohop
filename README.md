@@ -12,7 +12,7 @@ $ vpngate connect JP
 
 It uses the public server list from [VPN Gate](https://www.vpngate.net), an academic project at the University of Tsukuba in Japan. Volunteers around the world run the servers. `vpngate` picks the best server, connects with OpenVPN and moves on to the next server automatically if one is down.
 
-## Three ways to use it
+## Ways to use it
 
 | | What it does | Needs |
 | --- | --- | --- |
@@ -214,7 +214,43 @@ On older Claude Code versions:
 /plugin install vpngate@vpngate
 ```
 
-The plugin includes the CLI, so you only need Node.js 18+ and Docker; the installer above isn't required. Claude starts a proxy for the country, tests through it with curl or a Playwright browser, and stops the proxy when it's done. The instructions it follows are in [`skills/region-test/SKILL.md`](skills/region-test/SKILL.md).
+The plugin includes the CLI, so you only need Node.js 18+ and Docker; the installer above isn't required. Claude starts a proxy for the country, tests through it, and stops the proxy when it's done. It uses curl first, because redirects, currency and prices are usually decided on the server, and a real browser only when something appears after JavaScript runs. The instructions it follows are in [`skills/region-test/SKILL.md`](skills/region-test/SKILL.md).
+
+### Give Claude a browser in another country (optional)
+
+For things like geolocation popups, country selectors or screenshots, Claude needs a browser it can drive. Add a second Playwright MCP server that always goes through the proxy on port 1080:
+
+```bash
+claude mcp add playwright-geo -s user -- npx @playwright/mcp@latest --proxy-server socks5://127.0.0.1:1080 --isolated
+```
+
+Restart Claude Code afterwards. Then:
+
+- **The country is whatever proxy runs on port 1080.** Claude runs `vpngate proxy NL` and browses with the `playwright-geo` tools. To switch, it runs `vpngate proxy DE`, which replaces the proxy on 1080, so no restart is needed.
+- **Your normal `playwright` MCP server is untouched** and keeps working for local URLs like `http://127.0.0.1:9292`.
+- **It never leaks your real IP.** If no proxy is running on 1080, pages in `playwright-geo` simply don't load.
+- `--isolated` starts each session with a fresh profile, so cookies from one country don't carry over to the next.
+
+Then ask something like *"open the theme preview from the Netherlands and Japan and screenshot the header"*.
+
+## Use with Playwright
+
+Any Playwright setup can use the proxy, because Playwright supports SOCKS5:
+
+```js
+// Script
+const browser = await chromium.launch({ proxy: { server: 'socks5://127.0.0.1:1080' } });
+```
+
+```ts
+// playwright.config.ts: run the same tests from several countries
+projects: [
+  { name: 'NL', use: { proxy: { server: 'socks5://127.0.0.1:1080' } } },
+  { name: 'JP', use: { proxy: { server: 'socks5://127.0.0.1:1081' } } },
+],
+```
+
+Start the matching proxies first, for example `vpngate proxy NL` and `vpngate proxy JP --port 1081`.
 
 ## Is it safe?
 

@@ -62,14 +62,35 @@ curl -sI -L -x socks5h://127.0.0.1:1080 https://example.com
 curl -sL -x socks5h://127.0.0.1:1080 https://example.com | grep -o 'JPY\|¥[0-9,]*' | head
 ```
 
-For a real browser (JavaScript, consent banners, client-side redirects), write a short
-Playwright script and launch Chromium with the proxy:
+Start with curl. Redirects, currency and prices in the HTML, and headers are decided on the
+server, so curl usually answers the question and can check several countries in parallel.
+
+### When you need a real browser
+
+Use a browser only for things that appear after JavaScript runs: geolocation popups, country
+selectors, consent banners, client-side redirects, or when the user wants screenshots.
+
+**If a `playwright-geo` MCP server is available** (tools named `mcp__playwright-geo__*`), use it.
+Its browser always goes through `socks5://127.0.0.1:1080`, so the country is whatever proxy runs
+on port 1080:
+
+1. Start the country on port 1080: `vpngate proxy NL`. This replaces any proxy already on 1080.
+2. Use the `playwright-geo` tools to navigate, snapshot, click and screenshot.
+3. To switch country, run `vpngate proxy DE` (it swaps the proxy on 1080), then navigate again.
+4. If its pages fail to load, the proxy on 1080 isn't running. It never falls back to the real IP.
+
+Use the normal `playwright` MCP server for everything else, such as local URLs. It doesn't go
+through the proxy.
+
+**If there is no `playwright-geo` server**, write a short Playwright script instead:
 
 ```js
 const browser = await chromium.launch({ proxy: { server: 'socks5://127.0.0.1:1080' } });
 ```
 
-An already running Playwright MCP browser cannot switch proxies, so use a script for this.
+The normal `playwright` MCP browser can't switch to a proxy. Don't use it for region tests. If the
+user wants a browser Claude can drive, suggest adding `playwright-geo`:
+`claude mcp add playwright-geo -s user -- npx @playwright/mcp@latest --proxy-server socks5://127.0.0.1:1080 --isolated`
 
 Geolocation by IP and language are separate things. Sites often decide language from the
 `Accept-Language` header, so send it if you want to simulate a real local visitor, for example

@@ -22,22 +22,40 @@ running, ask the user to start Docker. Do not try to install Docker yourself.
 ## 2. Pick a country and start the proxy
 
 ```bash
-vpngate countries                 # what is online right now (mostly JP and KR, others vary)
+vpngate countries                 # VPN Gate countries online now (mostly JP and KR, others vary)
 vpngate proxy JP                  # socks5://127.0.0.1:1080, returns once the proxy works
 vpngate proxy US --port 1081      # another country at the same time, on another port
 ```
 
 The command tries up to 5 servers and exits 0 when the proxy is ready, printing the exit IP and
-country. It takes 5-30 seconds. If the country you need isn't listed, tell the user. Do not
-substitute another country silently.
+country. It takes 5-30 seconds.
+
+**If the country isn't in `vpngate countries`**, use Tor, which has exits in most countries:
+
+```bash
+vpngate proxy NL --via tor        # needs a two-letter country code, takes 20-60 seconds
+```
+
+Tor is slower and blocked or CAPTCHA'd by more sites than VPN Gate, so prefer VPN Gate when the
+country is available. If neither works, tell the user. Do not substitute another country silently.
+
+**If the user has their own OpenVPN config** (their own server or a provider like Proton VPN),
+use it instead. It is faster and more reliable than both:
+
+```bash
+vpngate proxy --config ./nl.ovpn --auth ./login.txt   # --auth only if the config needs a login
+```
+
+Only use config and login files the user points you to.
 
 ## 3. Test through the proxy
 
 Always use `socks5h://` (with the `h`) so DNS is resolved in the VPN country too.
 
 ```bash
-# Confirm where you appear to be
-curl -s -x socks5h://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace | grep loc
+# Confirm where you appear to be: exit IP through the proxy, then its country directly
+# (geo services called through Tor report "T1" instead of a country)
+ip=$(curl -s -x socks5h://127.0.0.1:1080 https://api.ipify.org) && curl -s "https://api.country.is/$ip"
 
 # Redirects and headers (geo-redirects, Vary, Set-Cookie, cache headers)
 curl -sI -L -x socks5h://127.0.0.1:1080 https://example.com

@@ -3,7 +3,19 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { bold, cyan, dim, green, mbps, red, table, yellow } from '../src/format.js';
 import { filterServers, getServers, groupByCountry } from '../src/servers.js';
-import { buildImage, checkProxy, containerName, dockerStatus, hasImage, listProxies, removeProxy, startProxy } from '../src/proxy.js';
+import { loadCustomConfig } from '../src/custom.js';
+import {
+  buildImage,
+  checkProxy,
+  containerName,
+  dockerStatus,
+  hasImage,
+  imageTag,
+  listProxies,
+  removeProxy,
+  startProxy,
+  startTorProxy,
+} from '../src/proxy.js';
 import {
   authorizeSudo,
   findOpenVPN,
@@ -29,9 +41,12 @@ ${bold('Usage')}
   vpngate proxy stop          Stop proxies (all, or the one on --port)
 
 ${bold('Options')}
+  --via tor           For "proxy": exit through Tor in any country (slower, no VPN Gate needed)
+  --config <file>     Use your own .ovpn file instead of VPN Gate (connect or proxy)
+  --auth <file>       Username and password for --config (line 1 and line 2)
   --proto <tcp|udp>   Only use servers with this protocol
   --tries <n>         Servers to try before giving up (default 5)
-  --timeout <sec>     Seconds to wait for each server (default 20)
+  --timeout <sec>     Seconds to wait for each server (default 20, Tor 90)
   --limit <n>         Rows to show in "list" (default 20)
   --port <n>          Local port for "proxy" (default 1080)
   --refresh           Ignore the cached server list
@@ -43,6 +58,8 @@ ${bold('Examples')}
   vpngate connect korea --proto udp
   vpngate list US
   vpngate proxy JP && curl -x socks5h://127.0.0.1:1080 https://example.com
+  vpngate proxy NL --via tor
+  vpngate proxy --config ./nl.ovpn --auth ./nl-login.txt
 
 Country can be a code (JP) or the start of a name (japan).
 Servers are run by volunteers via VPN Gate (https://www.vpngate.net).
@@ -59,8 +76,11 @@ try {
     allowPositionals: true,
     options: {
       proto: { type: 'string' },
+      via: { type: 'string' },
+      config: { type: 'string' },
+      auth: { type: 'string' },
       tries: { type: 'string', default: '5' },
-      timeout: { type: 'string', default: '20' },
+      timeout: { type: 'string' },
       limit: { type: 'string', default: '20' },
       port: { type: 'string' },
       refresh: { type: 'boolean', default: false },
@@ -85,9 +105,29 @@ async function selectServers() {
   if (opts.proto && !['tcp', 'udp'].includes(opts.proto)) fail('--proto must be tcp or udp');
   const servers = filterServers(await loadServers(), { country: countryArg, proto: opts.proto });
   if (servers.length === 0) {
-    fail(`No servers found${countryArg ? ` for "${countryArg}"` : ''}. Run "vpngate countries" to see what's available.`);
+    const torHint = /^[a-z]{2}$/i.test(countryArg ?? '')
+      ? `\n  For countries VPN Gate doesn't have, try: vpngate proxy ${countryArg.toUpperCase()} --via tor`
+      : '';
+    fail(`No servers found${countryArg ? ` for "${countryArg}"` : ''}. Run "vpngate countries" to see what's available.${torHint}`);
   }
   return servers;
+}
+
+async function loadCustom({ forProxy }) {
+  const server = await loadCustomConfig(opts.config, opts.auth);
+  if (forProxy && server.usesExternalFiles) {
+    fail(
+      `${opts.config} refers to separate certificate or key files. Proxy mode needs them inline ` +
+        'in the .ovpn file. Inline them, or use "vpngate connect --config" instead.',
+    );
+  }
+  return server;
+}
+
+async function candidateServers({ forProxy }) {
+  if (opts.auth && !opts.config) fail('--auth only works together with --config');
+  if (opts.config) return [await loadCustom({ forProxy })];
+  return (await selectServers()).slice(0, Math.max(1, Number(opts.tries) || 5));
 }
 
 const countryNames = new Intl.DisplayNames(['en'], { type: 'region' });
@@ -111,7 +151,7 @@ async function lookupIp() {
 }
 
 const describe = (s) =>
-  `${s.country} · ${s.host} ${dim(`${s.ip} ${s.proto}/${s.port} · ${mbps(s.speed)}`)}`;
+  `${s.country} · ${s.host} ${dim(`${s.ip} ${s.proto}/${s.port}${s.speed ? ` · ${mbps(s.speed)}` : ''}`)}`;
 
 async function cmdCountries() {
   const rows = groupByCountry(await loadServers()).map((g) => [cyan(g.code), g.name, g.count, mbps(g.bestSpeed)]);
@@ -150,7 +190,8 @@ async function cmdConnect() {
     );
   }
 
-  const candidates = (await selectServers()).slice(0, Math.max(1, Number(opts.tries) || 5));
+  if (opts.via === 'tor') fail('Tor works only with "vpngate proxy <country> --via tor"');
+  const candidates = await candidateServers({ forProxy: false });
   const timeoutMs = (Number(opts.timeout) || 20) * 1000;
   const sudo = needsSudo();
   if (sudo) {
@@ -173,7 +214,7 @@ async function cmdConnect() {
     console.log(`${dim(`[${i + 1}/${candidates.length}]`)} ${describe(server)}`);
     const config = await writeConfig(server);
     try {
-      const result = await startTunnel(openvpn, config.file, { sudo, timeoutMs, onLog });
+      const result = await startTunnel(openvpn, config.file, { sudo, timeoutMs, onLog, cwd: server.dir });
       if (!result.ok) {
         if (!stopping) console.log(`      ${red('✗')} ${result.reason}`);
         continue;
@@ -220,6 +261,24 @@ function cmdProxyStop() {
   if (proxies.length === 0) console.log('No proxies to stop.');
 }
 
+// Verifies the proxy end to end and prints how to use it. Returns false if it doesn't work.
+async function reportProxy(port, expectedCountry) {
+  const exit = await checkProxy(port);
+  if (!exit) {
+    removeProxy(containerName(port));
+    console.log(`      ${red('✗')} tunnel is up but the proxy is not reachable`);
+    return false;
+  }
+  console.log(`      ${green('✓ Proxy ready')}  ${bold(`socks5://127.0.0.1:${port}`)}`);
+  if (exit.ip) console.log(`      Exit IP ${bold(exit.ip)} (${exit.country ? countryName(exit.country) : 'unknown country'})`);
+  if (expectedCountry && exit.country && exit.country !== expectedCountry) {
+    console.log(yellow(`      ! Expected ${expectedCountry} but the exit is in ${exit.country}`));
+  }
+  console.log(dim(`      curl -x socks5h://127.0.0.1:${port} https://example.com`));
+  console.log(dim(`      Stop it with: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
+  return true;
+}
+
 async function cmdProxy() {
   const status = dockerStatus();
   if (status === 'missing') fail('Proxy mode needs Docker. Install it from https://docs.docker.com/get-docker/');
@@ -228,15 +287,24 @@ async function cmdProxy() {
   if (countryArg === 'status') return cmdProxyStatus();
   if (countryArg === 'stop') return cmdProxyStop();
 
-  const port = Number(opts.port) || 1080;
-  const image = `vpngate-proxy:${version}`;
-  if (!hasImage(image)) {
-    console.log(dim('Building the proxy image (first run only)...'));
-    buildImage(image);
+  if (opts.via && !['vpngate', 'tor'].includes(opts.via)) fail('--via must be vpngate or tor');
+  const tor = opts.via === 'tor';
+  if (tor && opts.config) fail('--via tor and --config cannot be combined');
+  if (tor && !/^[a-z]{2}$/i.test(countryArg ?? '')) {
+    fail('Tor needs a two-letter country code, for example: vpngate proxy NL --via tor');
   }
 
-  const candidates = (await selectServers()).slice(0, Math.max(1, Number(opts.tries) || 5));
-  const timeoutMs = (Number(opts.timeout) || 20) * 1000;
+  // Resolve servers before building anything, so a missing country fails fast.
+  const candidates = tor ? [] : await candidateServers({ forProxy: true });
+  const port = Number(opts.port) || 1080;
+  const kind = tor ? 'tor' : 'openvpn';
+  const image = imageTag(kind, version);
+  if (!hasImage(image)) {
+    console.log(dim(`Building the ${kind} proxy image (first run only)...`));
+    buildImage(kind, image);
+  }
+
+  const timeoutMs = (Number(opts.timeout) || (tor ? 90 : 20)) * 1000;
   const onLog = opts.verbose ? (line) => console.log(dim(`  ${line}`)) : undefined;
 
   // A half-started container would otherwise keep running after Ctrl+C.
@@ -244,6 +312,17 @@ async function cmdProxy() {
     removeProxy(containerName(port));
     process.exit(130);
   });
+
+  if (tor) {
+    const country = countryArg.toUpperCase();
+    console.log(`Tor · exits in ${countryName(country)} ${dim('(can take up to a minute)')}`);
+    const result = await startTorProxy(country, { image, port, timeoutMs, onLog });
+    if (!result.ok) fail(result.reason);
+    if (!(await reportProxy(port, country))) {
+      fail(`Tor started but couldn't reach the internet. There may be no Tor exits in ${country} right now.`);
+    }
+    return;
+  }
 
   for (const [i, server] of candidates.entries()) {
     console.log(`${dim(`[${i + 1}/${candidates.length}]`)} ${describe(server)}`);
@@ -253,19 +332,13 @@ async function cmdProxy() {
       console.log(`      ${red('✗')} ${result.reason}`);
       continue;
     }
-    const exit = checkProxy(port);
-    if (!exit) {
-      removeProxy(containerName(port));
-      console.log(`      ${red('✗')} tunnel is up but the proxy is not reachable`);
-      continue;
-    }
-    console.log(`      ${green('✓ Proxy ready')}  ${bold(`socks5://127.0.0.1:${port}`)}`);
-    if (exit.ip) console.log(`      Exit IP ${bold(exit.ip)} (${countryName(exit.country)})`);
-    console.log(dim(`      curl -x socks5h://127.0.0.1:${port} https://example.com`));
-    console.log(dim(`      Stop it with: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
-    return;
+    if (await reportProxy(port)) return;
   }
-  fail('Could not start a proxy on any server. Try another country, or --refresh.');
+  fail(
+    opts.config
+      ? `Could not connect with ${opts.config}. Run again with -v to see OpenVPN's output.`
+      : 'Could not start a proxy on any server. Try another country, --via tor, or --refresh.',
+  );
 }
 
 const commands = {

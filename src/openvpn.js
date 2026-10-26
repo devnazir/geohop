@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 // Homebrew and distro packages install openvpn into sbin, which is often not on PATH.
 const EXTRA_DIRS = ['/opt/homebrew/sbin', '/usr/local/sbin', '/usr/sbin', '/sbin'];
 const FALLBACK_CIPHERS = 'AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-128-CBC';
+const READY = /Initialization Sequence Completed/;
 const FATAL = /AUTH_FAILED|TLS Error|Connection refused|Exiting due to fatal error|Cannot resolve|Network is unreachable/;
 
 export function findOpenVPN() {
@@ -39,17 +40,26 @@ export async function writeConfig(server) {
 }
 
 // Resolves { ok: true, child } once the tunnel is up, or { ok: false, reason } on failure.
-export function startTunnel(openvpnPath, configFile, { sudo, timeoutMs, onLog }) {
+// `cwd` is where relative file paths inside the config (ca, cert, ...) are resolved from.
+export function startTunnel(openvpnPath, configFile, { sudo, timeoutMs, onLog, cwd }) {
   // One connect attempt per server, so failover moves on quickly instead of retrying forever.
-  const ovpnArgs = [openvpnPath, '--config', configFile, '--connect-retry-max', '1'];
+  const ovpnArgs = [
+    openvpnPath,
+    ...(cwd ? ['--cd', cwd] : []),
+    '--config', configFile,
+    '--connect-retry-max', '1',
+  ];
   const [cmd, ...args] = sudo ? ['sudo', '-n', ...ovpnArgs] : ovpnArgs;
   const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   return watchTunnel(child, { timeoutMs, onLog });
 }
 
-// Follows OpenVPN output from `child` (openvpn itself, or `docker logs -f`) until the tunnel is up.
+// Follows output from `child` (openvpn itself, or `docker logs -f`) until a line matches `ready`.
 // `stop` must make `child` exit; it is called on timeout.
-export function watchTunnel(child, { timeoutMs, onLog, stop = () => child.kill('SIGTERM') }) {
+export function watchTunnel(
+  child,
+  { timeoutMs, onLog, stop = () => child.kill('SIGTERM'), ready = READY, fatal = FATAL },
+) {
   return new Promise((resolve) => {
     let settled = false;
     let timedOut = false;
@@ -68,8 +78,8 @@ export function watchTunnel(child, { timeoutMs, onLog, stop = () => child.kill('
 
     const onLine = (line) => {
       onLog?.(line);
-      if (line.includes('Initialization Sequence Completed')) settle({ ok: true, child });
-      else if (FATAL.test(line)) lastError = line.replace(/^.*?\d{2}:\d{2}:\d{2}( \d{4})? /, '');
+      if (ready.test(line)) settle({ ok: true, child });
+      else if (fatal.test(line)) lastError = line.replace(/^.*?\d{2}:\d{2}:\d{2}( \d{4})? /, '');
     };
     createInterface({ input: child.stdout }).on('line', onLine);
     createInterface({ input: child.stderr }).on('line', onLine);
@@ -78,7 +88,7 @@ export function watchTunnel(child, { timeoutMs, onLog, stop = () => child.kill('
     child.on('exit', (code) => {
       const reason = timedOut
         ? `no connection after ${timeoutMs / 1000}s`
-        : lastError || `openvpn exited with code ${code}`;
+        : lastError || `exited with code ${code}`;
       settle({ ok: false, reason });
     });
   });

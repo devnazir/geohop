@@ -1,18 +1,18 @@
 #!/bin/sh
-# vpngate-cli installer
+# geohop installer
 #
-#   curl -fsSL https://raw.githubusercontent.com/devnazir/vpngate-cli/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/devnazir/vpngate-cli/main/install.sh | sh -s -- --uninstall
+#   curl -fsSL https://raw.githubusercontent.com/devnazir/geohop/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/devnazir/geohop/main/install.sh | sh -s -- --uninstall
 #
 # Installs OpenVPN (via your package manager), Node.js if a recent one is missing,
-# and the `vpngate` command.
+# and the `geohop` command.
 
 set -eu
 
-REPO="devnazir/vpngate-cli"
-REF="${VPNGATE_REF:-main}"
-INSTALL_DIR="${VPNGATE_INSTALL_DIR:-$HOME/.local/share/vpngate-cli}"
-BIN_DIR="${VPNGATE_BIN_DIR:-/usr/local/bin}"
+REPO="devnazir/geohop"
+REF="${GEOHOP_REF:-main}"
+INSTALL_DIR="${GEOHOP_INSTALL_DIR:-$HOME/.local/share/geohop}"
+BIN_DIR="${GEOHOP_BIN_DIR:-/usr/local/bin}"
 NODE_MAJOR=22
 MIN_NODE_MAJOR=18
 
@@ -64,7 +64,7 @@ install_openvpn() {
       else die "Unsupported package manager. Install OpenVPN yourself and run this again."
       fi
       ;;
-    *) die "Unsupported OS: $(uname -s). vpngate-cli supports macOS and Linux." ;;
+    *) die "Unsupported OS: $(uname -s). geohop supports macOS and Linux." ;;
   esac
   find_openvpn || die "OpenVPN install finished but the openvpn binary was not found"
   ok "OpenVPN installed"
@@ -103,7 +103,7 @@ resolve_node() {
     *) die "Unsupported CPU: $(uname -m). Install Node.js $MIN_NODE_MAJOR+ yourself and run this again." ;;
   esac
 
-  info "Downloading Node.js $NODE_MAJOR (private copy, only used by vpngate)" >&2
+  info "Downloading Node.js $NODE_MAJOR (private copy, only used by geohop)" >&2
   local base="https://nodejs.org/dist/latest-v${NODE_MAJOR}.x"
   local tmp file expected
   tmp="$(mktemp -d)"
@@ -123,7 +123,7 @@ resolve_node() {
 }
 
 install_app() {
-  info "Downloading vpngate-cli ($REF)"
+  info "Downloading geohop ($REF)"
   local tmp
   tmp="$(mktemp -d)"
   curl -fsSL "https://github.com/$REPO/archive/$REF.tar.gz" -o "$tmp/src.tar.gz"
@@ -135,27 +135,45 @@ install_app() {
 }
 
 link_command() {
-  local node="$1" launcher="$INSTALL_DIR/vpngate"
+  local node="$1" launcher="$INSTALL_DIR/geohop"
   cat >"$launcher" <<EOF
 #!/bin/sh
-exec "$node" "$INSTALL_DIR/app/bin/vpngate.js" "\$@"
+exec "$node" "$INSTALL_DIR/app/bin/geohop.js" "\$@"
 EOF
   chmod +x "$launcher"
 
   if [ -w "$BIN_DIR" ] || { [ ! -e "$BIN_DIR" ] && [ -w "$(dirname "$BIN_DIR")" ]; }; then
-    mkdir -p "$BIN_DIR" && ln -sf "$launcher" "$BIN_DIR/vpngate"
+    mkdir -p "$BIN_DIR" && ln -sf "$launcher" "$BIN_DIR/geohop"
   else
-    info "Linking vpngate into $BIN_DIR (needs your password)"
-    $SUDO mkdir -p "$BIN_DIR" && $SUDO ln -sf "$launcher" "$BIN_DIR/vpngate"
+    info "Linking geohop into $BIN_DIR (needs your password)"
+    $SUDO mkdir -p "$BIN_DIR" && $SUDO ln -sf "$launcher" "$BIN_DIR/geohop"
   fi
 }
 
-uninstall() {
-  info "Removing vpngate-cli"
-  if [ -L "$BIN_DIR/vpngate" ]; then
+# geohop used to be called vpngate-cli and installed a `vpngate` command.
+remove_legacy() {
+  if [ -L "$BIN_DIR/vpngate" ] && readlink "$BIN_DIR/vpngate" | grep -q vpngate-cli; then
+    info "Removing the old vpngate command (it's now geohop)"
     if [ -w "$BIN_DIR" ]; then rm -f "$BIN_DIR/vpngate"; else $SUDO rm -f "$BIN_DIR/vpngate"; fi
   fi
-  rm -rf "$INSTALL_DIR" "${XDG_CACHE_HOME:-$HOME/.cache}/vpngate-cli"
+  rm -rf "$HOME/.local/share/vpngate-cli" "${XDG_CACHE_HOME:-$HOME/.cache}/vpngate-cli"
+  # Old proxies would otherwise keep holding their ports, unseen by geohop.
+  if has docker && docker info >/dev/null 2>&1; then
+    old="$(docker ps -aq --filter label=vpngate-proxy)"
+    [ -n "$old" ] && docker rm -f $old >/dev/null
+    images="$(docker image ls -q 'vpngate-openvpn' 2>/dev/null; docker image ls -q 'vpngate-tor' 2>/dev/null; docker image ls -q 'vpngate-proxy' 2>/dev/null)"
+    [ -n "$images" ] && docker image rm -f $images >/dev/null 2>&1
+  fi
+  return 0
+}
+
+uninstall() {
+  remove_legacy
+  info "Removing geohop"
+  if [ -L "$BIN_DIR/geohop" ]; then
+    if [ -w "$BIN_DIR" ]; then rm -f "$BIN_DIR/geohop"; else $SUDO rm -f "$BIN_DIR/geohop"; fi
+  fi
+  rm -rf "$INSTALL_DIR" "${XDG_CACHE_HOME:-$HOME/.cache}/geohop"
   ok "Uninstalled. OpenVPN was left installed; remove it with your package manager if you like."
 }
 
@@ -166,19 +184,20 @@ main() {
     return
   fi
 
-  printf '\n%svpngate-cli installer%s\n\n' "$BOLD" "$RESET"
+  printf '\n%sgeohop installer%s\n\n' "$BOLD" "$RESET"
   install_openvpn
   local node
   node="$(resolve_node)"
   install_app
   link_command "$node"
-  "$BIN_DIR/vpngate" --version >/dev/null || die "Install finished but vpngate failed to run"
+  remove_legacy
+  "$BIN_DIR/geohop" --version >/dev/null || die "Install finished but geohop failed to run"
 
   ok "Installed! Try:"
-  printf '\n  vpngate countries\n  vpngate connect JP\n\n'
+  printf '\n  geohop countries\n  geohop proxy JP\n  geohop check https://example.com\n\n'
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) printf '%sNote: %s is not on your PATH. Add it, or run %s/vpngate directly.%s\n' "$DIM" "$BIN_DIR" "$BIN_DIR" "$RESET" ;;
+    *) printf '%sNote: %s is not on your PATH. Add it, or run %s/geohop directly.%s\n' "$DIM" "$BIN_DIR" "$BIN_DIR" "$RESET" ;;
   esac
 }
 

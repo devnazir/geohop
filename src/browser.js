@@ -6,7 +6,7 @@ import { delimiter, join } from 'node:path';
 
 const PROFILES_DIR = join(
   process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
-  'vpngate-cli',
+  'geohop',
   'browsers',
 );
 

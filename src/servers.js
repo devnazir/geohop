@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const API_URL = 'https://www.vpngate.net/api/iphone/';
-const CACHE_DIR = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'vpngate-cli');
+const CACHE_DIR = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'geohop');
 const CACHE_FILE = join(CACHE_DIR, 'servers.csv');
 const CACHE_TTL_MS = 10 * 60 * 1000;
 

@@ -37,7 +37,7 @@ export async function checkSite(url, { port } = {}) {
     result.ipCountry = await ipCountry(t.ip);
   }
 
-  const marker = '\n__vpngate_meta__ ';
+  const marker = '\n__geohop_meta__ ';
   const page = curl(['-L', '-D', '-', '-w', `${marker}%{url_effective} %{http_code}`, url], { port });
   const metaAt = page.stdout.lastIndexOf(marker);
   if (page.status !== 0 || metaAt === -1) {

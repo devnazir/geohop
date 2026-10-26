@@ -1,12 +1,12 @@
 {
-  "name": "vpngate",
-  "displayName": "VPN Gate Region Testing",
-  "version": "0.5.0",
-  "description": "Lets Claude test websites and APIs from other countries through free VPN Gate proxies. No signup, no sudo, needs Docker.",
+  "name": "geohop",
+  "displayName": "geohop",
+  "version": "0.6.0",
+  "description": "Lets Claude test websites and APIs from other countries: geo-redirects, prices, banners and Shopify markets. Free proxies via VPN Gate and Tor, no signup, needs Docker.",
   "author": {
     "name": "devnazir"
   },
-  "repository": "https://github.com/devnazir/vpngate-cli",
+  "repository": "https://github.com/devnazir/geohop",
   "license": "MIT",
-  "keywords": ["vpn", "geo-testing", "proxy", "region", "localization"]
+  "keywords": ["geo-testing", "geolocation", "proxy", "region", "localization", "shopify"]
 }

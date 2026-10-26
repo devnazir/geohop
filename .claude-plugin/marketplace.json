@@ -1,15 +1,15 @@
 {
-  "name": "vpngate",
-  "description": "Free region testing for Claude Code, powered by VPN Gate.",
+  "name": "geohop",
+  "description": "geohop: free geo-testing for Claude Code.",
   "owner": {
     "name": "devnazir",
     "url": "https://github.com/devnazir"
   },
   "plugins": [
     {
-      "name": "vpngate",
+      "name": "geohop",
       "source": "./",
-      "description": "Test websites and APIs from other countries through free VPN Gate proxies. Needs Docker."
+      "description": "Test websites and APIs from other countries through free proxies. Needs Docker."
     }
   ]
 }

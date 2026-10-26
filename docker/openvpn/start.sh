@@ -11,11 +11,11 @@ while :; do
   eval "name=\${VPN_NAME_$i:-server $i}"
   printf '%s' "$config" | base64 -d > /vpn/config.ovpn
   echo "$name" > /vpn/current
-  echo "vpngate: connecting to $name"
+  echo "geohop: connecting to $name"
   openvpn --config /vpn/config.ovpn --dev tun0 --connect-retry-max 1 \
     --script-security 2 --route-up /vpn/route-up.sh
   [ -f /vpn/connected ] || exit 1
-  echo "vpngate: $name disconnected, switching to the next server"
+  echo "geohop: $name disconnected, switching to the next server"
   i=$(( (i + 1) % count ))
   sleep 3
 done

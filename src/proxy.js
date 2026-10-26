@@ -7,12 +7,12 @@ import { watchTunnel, withCipherFallback } from './openvpn.js';
 //   tun device, so no sudo is needed on the host.
 // - tor: Tor restricted to exit relays in one country.
 const DOCKER_DIR = fileURLToPath(new URL('../docker/', import.meta.url));
-const LABEL = 'vpngate-proxy';
+const LABEL = 'geohop-proxy';
 
 const docker = (args) => spawnSync('docker', args, { encoding: 'utf8' });
 
-export const containerName = (port) => `vpngate-proxy-${port}`;
-export const imageTag = (kind, version) => `vpngate-${kind}:${version}`;
+export const containerName = (port) => `geohop-proxy-${port}`;
+export const imageTag = (kind, version) => `geohop-${kind}:${version}`;
 
 export function dockerStatus() {
   const res = docker(['info', '--format', '{{.ServerVersion}}']);
@@ -35,7 +35,7 @@ export function removeProxy(name) {
 function runProxy({ port, image, labels, args = [], ready, fatal, timeoutMs, onLog }) {
   const name = containerName(port);
   removeProxy(name);
-  const labelArgs = Object.entries({ [LABEL]: '1', 'vpngate.port': port, ...labels }).flatMap(
+  const labelArgs = Object.entries({ [LABEL]: '1', 'geohop.port': port, ...labels }).flatMap(
     ([k, v]) => ['--label', `${k}=${v}`],
   );
   const run = docker(['run', '-d', '--name', name, ...labelArgs, '-p', `127.0.0.1:${port}:1080`, ...args, image]);
@@ -68,7 +68,7 @@ export function startProxy(server, { image, port, timeoutMs, onLog, fallbacks = 
     image,
     timeoutMs,
     onLog,
-    labels: { 'vpngate.country': server.countryCode, 'vpngate.server': server.host, 'vpngate.ip': server.ip },
+    labels: { 'geohop.country': server.countryCode, 'geohop.server': server.host, 'geohop.ip': server.ip },
     args: [
       '--cap-add', 'NET_ADMIN',
       '--device', '/dev/net/tun',
@@ -87,7 +87,7 @@ export function startTorProxy(countryCode, { image, port, timeoutMs, onLog }) {
     image,
     timeoutMs,
     onLog,
-    labels: { 'vpngate.country': countryCode, 'vpngate.server': 'tor', 'vpngate.ip': '' },
+    labels: { 'geohop.country': countryCode, 'geohop.server': 'tor', 'geohop.ip': '' },
     // Tor heals its own circuits; restarting covers the rare crash.
     args: ['--restart', 'on-failure', '-e', `TOR_COUNTRY=${countryCode.toLowerCase()}`],
     ready: /Bootstrapped 100%/,
@@ -129,10 +129,10 @@ export function listProxies() {
   const format = [
     '{{.Names}}',
     '{{.State}}',
-    '{{.Label "vpngate.port"}}',
-    '{{.Label "vpngate.country"}}',
-    '{{.Label "vpngate.server"}}',
-    '{{.Label "vpngate.ip"}}',
+    '{{.Label "geohop.port"}}',
+    '{{.Label "geohop.country"}}',
+    '{{.Label "geohop.server"}}',
+    '{{.Label "geohop.ip"}}',
     '{{.RunningFor}}',
   ].join('\t');
   const res = docker(['ps', '-a', '--filter', `label=${LABEL}`, '--format', format]);

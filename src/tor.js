@@ -5,7 +5,7 @@ import { join } from 'node:path';
 // Onionoo is the Tor Project's public relay database.
 const ONIONOO_URL =
   'https://onionoo.torproject.org/details?search=flag:Exit&running=true&fields=country';
-const CACHE_DIR = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'vpngate-cli');
+const CACHE_DIR = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'geohop');
 const CACHE_FILE = join(CACHE_DIR, 'tor-exits.json');
 const CACHE_TTL_MS = 60 * 60 * 1000;
 

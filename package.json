@@ -1,10 +1,10 @@
 {
-  "name": "vpngate-cli",
-  "version": "0.5.0",
-  "description": "Free, no-signup VPN from your terminal, powered by the VPN Gate volunteer network",
+  "name": "geohop",
+  "version": "0.6.0",
+  "description": "Test websites from other countries: free geo-testing proxies, a browser and a Claude Code plugin. No signup.",
   "type": "module",
   "bin": {
-    "vpngate": "bin/vpngate.js"
+    "geohop": "bin/geohop.js"
   },
   "files": [
     "bin",
@@ -15,11 +15,15 @@
     "node": ">=18"
   },
   "keywords": [
+    "geo-testing",
+    "geolocation",
+    "proxy",
     "vpn",
     "vpngate",
-    "openvpn",
-    "cli",
-    "free-vpn"
+    "tor",
+    "shopify",
+    "playwright",
+    "cli"
   ],
   "author": "devnazir",
   "license": "MIT"

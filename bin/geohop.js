@@ -32,22 +32,22 @@ import {
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-const HELP = `${bold('vpngate')} ${dim(`v${version}`)} - free, no-signup VPN from your terminal
+const HELP = `${bold('geohop')} ${dim(`v${version}`)} - test websites from other countries. Free, no signup.
 
 ${bold('Usage')}
-  vpngate connect [country]   Connect to the best server (optionally in a country)
-  vpngate countries           List available countries
-  vpngate list [country]      List servers, best first
-  vpngate ip                  Show your current public IP and location
+  geohop connect [country]   Connect to the best server (optionally in a country)
+  geohop countries           List available countries
+  geohop list [country]      List servers, best first
+  geohop ip                  Show your current public IP and location
 
-  vpngate proxy [country]     Start a SOCKS5 proxy that exits in a country (needs Docker, no sudo)
-  vpngate proxy status        List running proxies
-  vpngate proxy stop          Stop proxies (all, or the one on --port)
+  geohop proxy [country]     Start a SOCKS5 proxy that exits in a country (needs Docker, no sudo)
+  geohop proxy status        List running proxies
+  geohop proxy stop          Stop proxies (all, or the one on --port)
 
-  vpngate check <url>         Show which country a site detects through the proxy on --port
+  geohop check <url>         Show which country a site detects through the proxy on --port
                               (default 1080), or with --direct, through your own connection
 
-  vpngate browser [country] [url]
+  geohop browser [country] [url]
                               Open a separate browser window that browses from a country.
                               Starts (or reuses) a proxy for it. Without a country, uses the
                               proxy already running on --port.
@@ -68,14 +68,14 @@ ${bold('Options')}
   -h, --help          Show this help
 
 ${bold('Examples')}
-  vpngate connect JP
-  vpngate connect korea --proto udp
-  vpngate list US
-  vpngate proxy JP && curl -x socks5h://127.0.0.1:1080 https://example.com
-  vpngate proxy NL                (no VPN Gate servers, so this uses Tor)
-  vpngate proxy --config ./nl.ovpn --auth ./nl-login.txt
-  vpngate browser NL https://example.myshopify.com/?preview_theme_id=123
-  vpngate check https://example.com
+  geohop connect JP
+  geohop connect korea --proto udp
+  geohop list US
+  geohop proxy JP && curl -x socks5h://127.0.0.1:1080 https://example.com
+  geohop proxy NL                (no VPN Gate servers, so this uses Tor)
+  geohop proxy --config ./nl.ovpn --auth ./nl-login.txt
+  geohop browser NL https://example.myshopify.com/?preview_theme_id=123
+  geohop check https://example.com
 
 Country can be a code (JP) or the start of a name (japan).
 Servers are run by volunteers via VPN Gate (https://www.vpngate.net).
@@ -108,7 +108,7 @@ try {
     },
   });
 } catch (err) {
-  fail(`${err.message}\n  Run "vpngate --help" for usage.`);
+  fail(`${err.message}\n  Run "geohop --help" for usage.`);
 }
 const { values: opts, positionals } = parsed;
 const [command = 'help', countryArg] = positionals;
@@ -128,9 +128,9 @@ async function selectServers(country = countryArg) {
   const servers = await matchingServers(country);
   if (servers.length === 0) {
     const torHint = country
-      ? `\n  It may be available through Tor, which works in proxy mode: vpngate proxy ${country}`
+      ? `\n  It may be available through Tor, which works in proxy mode: geohop proxy ${country}`
       : '';
-    fail(`No VPN Gate servers found${country ? ` for "${country}"` : ''}. Run "vpngate countries" to see what's available.${torHint}`);
+    fail(`No VPN Gate servers found${country ? ` for "${country}"` : ''}. Run "geohop countries" to see what's available.${torHint}`);
   }
   return servers;
 }
@@ -155,7 +155,7 @@ async function loadCustom({ forProxy }) {
   if (forProxy && server.usesExternalFiles) {
     fail(
       `${opts.config} refers to separate certificate or key files. Proxy mode needs them inline ` +
-        'in the .ovpn file. Inline them, or use "vpngate connect --config" instead.',
+        'in the .ovpn file. Inline them, or use "geohop connect --config" instead.',
     );
   }
   return server;
@@ -213,7 +213,7 @@ async function cmdCountries() {
 
   console.log(table(['Code', 'Country', 'Servers', 'Fastest', 'Tor exits'], rows));
   if (torExits) {
-    console.log(dim(`\n(Tor) countries work with proxy mode only and use Tor automatically: vpngate proxy <code>`));
+    console.log(dim(`\n(Tor) countries work with proxy mode only and use Tor automatically: geohop proxy <code>`));
     console.log(dim(`Sites that detect country through Cloudflare can't see Tor's country, so geo tests may not work there.`));
   } else {
     console.error(yellow('\n! Could not load the Tor exit list, showing VPN Gate countries only'));
@@ -252,7 +252,7 @@ async function cmdConnect() {
     );
   }
 
-  if (opts.via === 'tor') fail('Tor works only with "vpngate proxy <country> --via tor"');
+  if (opts.via === 'tor') fail('Tor works only with "geohop proxy <country> --via tor"');
   const candidates = await candidateServers({ forProxy: false });
   const timeoutMs = (Number(opts.timeout) || 20) * 1000;
   const sudo = needsSudo();
@@ -358,7 +358,7 @@ async function reportProxy(port, expectedCountry) {
   }
   if (exit.cloudflareSeesTor) warnTor();
   console.log(dim(`      curl -x socks5h://127.0.0.1:${port} https://example.com`));
-  console.log(dim(`      Stop it with: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
+  console.log(dim(`      Stop it with: geohop proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
   return true;
 }
 
@@ -380,7 +380,7 @@ async function cmdProxy() {
 async function launchProxy(country, port) {
   if (opts.via && !['vpngate', 'tor'].includes(opts.via)) fail('--via must be vpngate or tor');
   if (opts.via === 'tor' && opts.config) fail('--via tor and --config cannot be combined');
-  if (opts.via === 'tor' && !country) fail('Tor needs a country, for example: vpngate proxy NL --via tor');
+  if (opts.via === 'tor' && !country) fail('Tor needs a country, for example: geohop proxy NL --via tor');
 
   // Decide between VPN Gate and Tor before building anything, so a missing country fails fast.
   // Without --via, countries VPN Gate doesn't have fall back to Tor automatically.
@@ -388,14 +388,14 @@ async function launchProxy(country, port) {
   let candidates = [];
   if (opts.via === 'tor') {
     torCountry = await resolveTorCountry(country);
-    if (!torCountry) fail(`Tor has no exits in "${country}" right now. Run "vpngate countries" to see what's available.`);
+    if (!torCountry) fail(`Tor has no exits in "${country}" right now. Run "geohop countries" to see what's available.`);
   } else if (opts.config || !country || opts.via === 'vpngate') {
     candidates = await candidateServers({ forProxy: true, country });
   } else if ((await matchingServers(country)).length > 0) {
     candidates = await candidateServers({ forProxy: true, country });
   } else {
     torCountry = await resolveTorCountry(country);
-    if (!torCountry) fail(`"${country}" isn't available on VPN Gate or Tor right now. Run "vpngate countries" to see what's available.`);
+    if (!torCountry) fail(`"${country}" isn't available on VPN Gate or Tor right now. Run "geohop countries" to see what's available.`);
     console.log(dim(`No VPN Gate servers in ${countryName(torCountry)}, using Tor instead.`));
   }
   const tor = torCountry !== null;
@@ -446,7 +446,7 @@ async function launchProxy(country, port) {
 
 const looksLikeUrl = (s) => /^[a-z]+:\/\//i.test(s) || /^[^\s/]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(s);
 
-// Lowest port from 1080 up that no running vpngate proxy uses.
+// Lowest port from 1080 up that no running geohop proxy uses.
 function nextFreePort(proxies) {
   const used = new Set(proxies.map((p) => p.port));
   let port = 1080;
@@ -468,7 +468,7 @@ async function cmdBrowser() {
   if (!country) {
     port = Number(opts.port) || 1080;
     const proxy = running.find((p) => p.port === port);
-    if (!proxy) fail(`No proxy running on port ${port}. Add a country, for example: vpngate browser NL ${url ?? '<url>'}`);
+    if (!proxy) fail(`No proxy running on port ${port}. Add a country, for example: geohop browser NL ${url ?? '<url>'}`);
     code = proxy.country;
     if (proxy.server === 'tor') warnTor();
   } else {
@@ -491,12 +491,12 @@ async function cmdBrowser() {
   await openBrowser(name, { port, country: code, url });
   console.log(`${green('✓')} Opened ${browserLabel(name)} browsing from ${bold(countryName(code))}${url ? dim(` → ${url}`) : ''}`);
   console.log(dim('  Only that window uses the proxy. Your normal browser is unaffected.'));
-  console.log(dim(`  When you're done, close the window and run: vpngate proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
+  console.log(dim(`  When you're done, close the window and run: geohop proxy stop${port === 1080 ? '' : ` --port ${port}`}`));
 }
 
 async function cmdCheck() {
   let url = positionals[1];
-  if (!url) fail('Give a URL, for example: vpngate check https://example.com');
+  if (!url) fail('Give a URL, for example: geohop check https://example.com');
   if (!/^[a-z]+:\/\//i.test(url)) url = `https://${url}`;
 
   let port = null;
@@ -505,7 +505,7 @@ async function cmdCheck() {
     requireDocker();
     port = Number(opts.port) || 1080;
     const proxy = listProxies().find((p) => p.port === port && p.state === 'running');
-    if (!proxy) fail(`No proxy running on port ${port}. Start one (vpngate proxy NL) or use --direct.`);
+    if (!proxy) fail(`No proxy running on port ${port}. Start one (geohop proxy NL) or use --direct.`);
     via = `the ${countryName(proxy.country)} proxy on port ${port}`;
   }
   console.log(dim(`Checking ${url} through ${via}...`));
@@ -557,5 +557,5 @@ const commands = {
 
 if (opts.version) console.log(version);
 else if (opts.help || command === 'help') console.log(HELP);
-else if (!commands[command]) fail(`Unknown command "${command}". Run "vpngate --help".`);
+else if (!commands[command]) fail(`Unknown command "${command}". Run "geohop --help".`);
 else commands[command]().catch((err) => fail(err.message));

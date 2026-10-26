@@ -33,7 +33,7 @@ export const withCipherFallback = (config) =>
   /^\s*data-ciphers\s/m.test(config) ? config : `${config}\ndata-ciphers ${FALLBACK_CIPHERS}\n`;
 
 export async function writeConfig(server) {
-  const dir = await mkdtemp(join(tmpdir(), 'vpngate-'));
+  const dir = await mkdtemp(join(tmpdir(), 'geohop-'));
   const file = join(dir, 'config.ovpn');
   await writeFile(file, withCipherFallback(server.config), { mode: 0o600 });
   return { file, cleanup: () => rm(dir, { recursive: true, force: true }) };

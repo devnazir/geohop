@@ -42,7 +42,8 @@ ${bold('Usage')}
   vpngate proxy stop          Stop proxies (all, or the one on --port)
 
 ${bold('Options')}
-  --via tor           For "proxy": exit through Tor in any country (slower, no VPN Gate needed)
+  --via <tor|vpngate> For "proxy": force Tor or VPN Gate. By default, countries without
+                      VPN Gate servers use Tor automatically.
   --config <file>     Use your own .ovpn file instead of VPN Gate (connect or proxy)
   --auth <file>       Username and password for --config (line 1 and line 2)
   --proto <tcp|udp>   Only use servers with this protocol
@@ -59,7 +60,7 @@ ${bold('Examples')}
   vpngate connect korea --proto udp
   vpngate list US
   vpngate proxy JP && curl -x socks5h://127.0.0.1:1080 https://example.com
-  vpngate proxy NL --via tor
+  vpngate proxy NL                (no VPN Gate servers, so this uses Tor)
   vpngate proxy --config ./nl.ovpn --auth ./nl-login.txt
 
 Country can be a code (JP) or the start of a name (japan).
@@ -102,16 +103,35 @@ async function loadServers() {
   return servers;
 }
 
-async function selectServers() {
+async function matchingServers() {
   if (opts.proto && !['tcp', 'udp'].includes(opts.proto)) fail('--proto must be tcp or udp');
-  const servers = filterServers(await loadServers(), { country: countryArg, proto: opts.proto });
+  return filterServers(await loadServers(), { country: countryArg, proto: opts.proto });
+}
+
+async function selectServers() {
+  const servers = await matchingServers();
   if (servers.length === 0) {
-    const torHint = /^[a-z]{2}$/i.test(countryArg ?? '')
-      ? `\n  For countries VPN Gate doesn't have, try: vpngate proxy ${countryArg.toUpperCase()} --via tor`
+    const torHint = countryArg
+      ? `\n  It may be available through Tor, which works in proxy mode: vpngate proxy ${countryArg}`
       : '';
-    fail(`No servers found${countryArg ? ` for "${countryArg}"` : ''}. Run "vpngate countries" to see what's available.${torHint}`);
+    fail(`No VPN Gate servers found${countryArg ? ` for "${countryArg}"` : ''}. Run "vpngate countries" to see what's available.${torHint}`);
   }
   return servers;
+}
+
+// Resolves a country code or name ("nl", "netherlands") to a code with running Tor exits.
+// Returns null if Tor has no exits there. Trusts any two-letter code if the exit list is unavailable.
+async function resolveTorCountry(query) {
+  const q = query.toLowerCase();
+  const exits = await getTorExitCounts({ refresh: opts.refresh });
+  if (!exits) return /^[a-z]{2}$/.test(q) ? q.toUpperCase() : null;
+  const codes = [...exits.keys()];
+  // Exact codes win over name prefixes, so "in" is India rather than Indonesia.
+  return (
+    codes.find((code) => code.toLowerCase() === q) ??
+    codes.find((code) => countryName(code).toLowerCase().startsWith(q)) ??
+    null
+  );
 }
 
 async function loadCustom({ forProxy }) {
@@ -177,7 +197,7 @@ async function cmdCountries() {
 
   console.log(table(['Code', 'Country', 'Servers', 'Fastest', 'Tor exits'], rows));
   if (torExits) {
-    console.log(dim(`\n(Tor) countries work with proxy mode only: vpngate proxy <code> --via tor`));
+    console.log(dim(`\n(Tor) countries work with proxy mode only and use Tor automatically: vpngate proxy <code>`));
   } else {
     console.error(yellow('\n! Could not load the Tor exit list, showing VPN Gate countries only'));
   }
@@ -313,14 +333,26 @@ async function cmdProxy() {
   if (countryArg === 'stop') return cmdProxyStop();
 
   if (opts.via && !['vpngate', 'tor'].includes(opts.via)) fail('--via must be vpngate or tor');
-  const tor = opts.via === 'tor';
-  if (tor && opts.config) fail('--via tor and --config cannot be combined');
-  if (tor && !/^[a-z]{2}$/i.test(countryArg ?? '')) {
-    fail('Tor needs a two-letter country code, for example: vpngate proxy NL --via tor');
-  }
+  if (opts.via === 'tor' && opts.config) fail('--via tor and --config cannot be combined');
+  if (opts.via === 'tor' && !countryArg) fail('Tor needs a country, for example: vpngate proxy NL --via tor');
 
-  // Resolve servers before building anything, so a missing country fails fast.
-  const candidates = tor ? [] : await candidateServers({ forProxy: true });
+  // Decide between VPN Gate and Tor before building anything, so a missing country fails fast.
+  // Without --via, countries VPN Gate doesn't have fall back to Tor automatically.
+  let torCountry = null;
+  let candidates = [];
+  if (opts.via === 'tor') {
+    torCountry = await resolveTorCountry(countryArg);
+    if (!torCountry) fail(`Tor has no exits in "${countryArg}" right now. Run "vpngate countries" to see what's available.`);
+  } else if (opts.config || !countryArg || opts.via === 'vpngate') {
+    candidates = await candidateServers({ forProxy: true });
+  } else if ((await matchingServers()).length > 0) {
+    candidates = await candidateServers({ forProxy: true });
+  } else {
+    torCountry = await resolveTorCountry(countryArg);
+    if (!torCountry) fail(`"${countryArg}" isn't available on VPN Gate or Tor right now. Run "vpngate countries" to see what's available.`);
+    console.log(dim(`No VPN Gate servers in ${countryName(torCountry)}, using Tor instead.`));
+  }
+  const tor = torCountry !== null;
   const port = Number(opts.port) || 1080;
   const kind = tor ? 'tor' : 'openvpn';
   const image = imageTag(kind, version);
@@ -339,7 +371,7 @@ async function cmdProxy() {
   });
 
   if (tor) {
-    const country = countryArg.toUpperCase();
+    const country = torCountry;
     console.log(`Tor · exits in ${countryName(country)} ${dim('(can take up to a minute)')}`);
     const result = await startTorProxy(country, { image, port, timeoutMs, onLog });
     if (!result.ok) fail(result.reason);

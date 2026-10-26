@@ -30,16 +30,12 @@ vpngate proxy US --port 1081      # another country at the same time, on another
 The command tries up to 5 servers and exits 0 when the proxy is ready, printing the exit IP and
 country. It takes 5-30 seconds.
 
-**If the country is marked `(Tor)`** (no VPN Gate servers), use Tor:
+**Countries marked `(Tor)`** have no VPN Gate servers. `vpngate proxy <country>` uses Tor for
+them automatically and prints "using Tor instead". Tor takes 20-60 seconds to start.
 
-```bash
-vpngate proxy NL --via tor        # needs a two-letter country code, takes 20-60 seconds
-```
-
-Tor is slower and blocked or CAPTCHA'd by more sites than VPN Gate, so prefer VPN Gate when the
-country has servers. Countries with only a few Tor exits (see the "Tor exits" column) may be slow
-or fail. If a country isn't listed at all, or neither option works, tell the user. Do not
-substitute another country silently.
+Tor is slower and blocked or CAPTCHA'd by more sites than VPN Gate. Countries with only a few
+Tor exits (the "Tor exits" column) may be slow or fail. If a country isn't listed at all, or the
+proxy fails, tell the user. Do not substitute another country silently.
 
 **If the user has their own OpenVPN config** (their own server or a provider like Proton VPN),
 use it instead. It is faster and more reliable than both:

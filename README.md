@@ -17,7 +17,7 @@ It uses the public server list from [VPN Gate](https://www.vpngate.net), an acad
 | | What it does | Needs |
 | --- | --- | --- |
 | **[VPN mode](#vpn-mode)** `vpngate connect JP` | Sends all your computer's traffic through another country | OpenVPN, sudo |
-| **[Proxy mode](#proxy-mode)** `vpngate proxy JP` | A local SOCKS5 proxy in another country. Only the requests you send through it use the VPN. Several countries can run at once. Any country via [Tor](#any-country-with-tor). | Docker, no sudo |
+| **[Proxy mode](#proxy-mode)** `vpngate proxy JP` | A local SOCKS5 proxy in another country. Only the requests you send through it use the VPN. Several countries can run at once. Countries VPN Gate lacks use [Tor](#any-country-with-tor) automatically. | Docker, no sudo |
 | **[Claude Code plugin](#use-with-claude-code)** | Lets Claude test websites from other countries for you | Docker |
 
 ## Install
@@ -61,7 +61,7 @@ vpngate list JP              # servers in Japan, best first
 vpngate ip                   # your current public IP and country
 ```
 
-`vpngate countries` lists VPN Gate and Tor together. Countries marked **(Tor)** have no VPN Gate servers right now and work with [`--via tor`](#any-country-with-tor):
+`vpngate countries` lists VPN Gate and Tor together. Countries marked **(Tor)** have no VPN Gate servers right now, so proxy mode uses [Tor](#any-country-with-tor) for them automatically:
 
 ```
 Code  Country            Servers  Fastest   Tor exits
@@ -117,21 +117,24 @@ The first run builds a small Docker image (Alpine with OpenVPN and the Dante SOC
 
 ### Any country with Tor
 
-VPN Gate mostly has Japan and Korea. For other countries, such as the Netherlands, use Tor, which has exits in most countries and needs no signup either:
+VPN Gate mostly has Japan and Korea. When you ask for a country it doesn't have, such as the Netherlands, proxy mode switches to Tor automatically. Tor has exits in about 50 countries and needs no signup either:
 
 ```bash
-vpngate proxy NL --via tor                # Tor with Dutch exits only
-vpngate proxy DE --via tor --port 1081    # Germany at the same time
+vpngate proxy NL                  # no VPN Gate servers in NL, so this uses Tor
+vpngate proxy germany --port 1081 # names work too
 ```
 
 ```
-$ vpngate proxy NL --via tor
+$ vpngate proxy NL
+No VPN Gate servers in Netherlands, using Tor instead.
 Tor · exits in Netherlands (can take up to a minute)
       ✓ Proxy ready  socks5://127.0.0.1:1080
-      Exit IP 45.66.35.46 (Netherlands)
+      Exit IP 5.255.119.76 (Netherlands)
 ```
 
-Tor needs a two-letter country code. It takes 20 to 60 seconds to start, is slower than VPN Gate, and more sites block it or show CAPTCHAs. It works well for checking redirects, currency and language.
+Tor takes 20 to 60 seconds to start, is slower than VPN Gate, and more sites block it or show CAPTCHAs. It works well for checking redirects, currency and language. Countries with only a few Tor exits (see `vpngate countries`) may be slow or fail.
+
+To choose yourself, use `--via tor` to always use Tor, or `--via vpngate` to never fall back to it.
 
 ### Your own OpenVPN config
 
@@ -149,7 +152,7 @@ vpngate connect --config ./nl.ovpn --auth ./login.txt
 | Option | What it does |
 | --- | --- |
 | `--port <n>` | Local port for `proxy` (default 1080) |
-| `--via tor` | For `proxy`: exit through Tor in any country |
+| `--via tor\|vpngate` | For `proxy`: force Tor or VPN Gate (by default, Tor is used only when VPN Gate lacks the country) |
 | `--config <file>` | Use your own `.ovpn` file instead of VPN Gate |
 | `--auth <file>` | Username and password for `--config` (line 1 and line 2) |
 | `--proto tcp\|udp` | Only use servers with this protocol (almost all are TCP) |
@@ -190,7 +193,7 @@ The OpenVPN software is secure. **The servers are run by volunteers you don't kn
 ## Limits
 
 - No data cap or time limit, but speed depends on the volunteer server.
-- Most VPN Gate servers are in Japan and Korea. Other countries come and go; check `vpngate countries`, or use `--via tor`.
+- Most VPN Gate servers are in Japan and Korea. Other countries come and go; check `vpngate countries`. Proxy mode uses Tor for the rest.
 - Servers can disappear at any time. Just run the command again to get another one.
 - VPN Gate IPs are shared by many people, so some sites block them or show CAPTCHAs, and most streaming services won't work.
 

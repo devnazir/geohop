@@ -78,11 +78,11 @@ function parseLine(line) {
 
 export function filterServers(servers, { country, proto } = {}) {
   const q = country?.toLowerCase();
-  return servers.filter(
-    (s) =>
-      (!q || s.countryCode.toLowerCase() === q || s.country.toLowerCase().startsWith(q)) &&
-      (!proto || s.proto === proto),
-  );
+  const byProto = servers.filter((s) => !proto || s.proto === proto);
+  if (!q) return byProto;
+  // Exact codes win over name prefixes, so "in" is India rather than Indonesia.
+  const byCode = byProto.filter((s) => s.countryCode.toLowerCase() === q);
+  return byCode.length > 0 ? byCode : byProto.filter((s) => s.country.toLowerCase().startsWith(q));
 }
 
 export function groupByCountry(servers) {

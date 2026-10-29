@@ -48,6 +48,10 @@ export function startTunnel(openvpnPath, configFile, { sudo, timeoutMs, onLog, c
     ...(cwd ? ['--cd', cwd] : []),
     '--config', configFile,
     '--connect-retry-max', '1',
+    // VPN Gate tunnels carry IPv4 only. Without this, IPv6 traffic bypasses the tunnel and sites
+    // see the real country. Route all IPv6 into the tunnel and drop it, so apps fall back to IPv4.
+    '--redirect-gateway', 'def1', 'ipv6',
+    '--block-ipv6',
   ];
   const [cmd, ...args] = sudo ? ['sudo', '-n', ...ovpnArgs] : ovpnArgs;
   const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });

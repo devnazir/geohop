@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { bold, cyan, dim, green, mbps, red, table, yellow } from '../src/format.js';
@@ -177,14 +178,23 @@ const countryName = (code) => {
 };
 
 // Cloudflare's trace endpoint has no rate limit, unlike most IP APIs, which matters on shared VPN IPs.
-async function lookupIp() {
-  try {
-    const res = await fetch('https://www.cloudflare.com/cdn-cgi/trace', { signal: AbortSignal.timeout(8_000) });
-    const trace = Object.fromEntries((await res.text()).split('\n').map((l) => l.split('=')));
-    return { ip: trace.ip, country: trace.loc };
-  } catch {
-    return null;
-  }
+// IPv4 and IPv6 are checked separately: a dual-stack machine uses both, and a tunnel can cover one
+// but not the other. Returns null when that family has no working connection.
+function lookupIp(family) {
+  const res = spawnSync('curl', ['-s', `-${family}`, '-m', '8', 'https://www.cloudflare.com/cdn-cgi/trace'], {
+    encoding: 'utf8',
+  });
+  if (res.status !== 0 || !res.stdout) return null;
+  const trace = Object.fromEntries(res.stdout.split('\n').map((l) => l.split('=')));
+  return trace.ip ? { ip: trace.ip, country: trace.loc } : null;
+}
+
+function printIps(indent = '') {
+  const v4 = lookupIp(4);
+  const v6 = lookupIp(6);
+  if (v4) console.log(`${indent}IPv4 ${bold(v4.ip)} (${countryName(v4.country)})`);
+  if (v6) console.log(`${indent}IPv6 ${bold(v6.ip)} (${countryName(v6.country)})`);
+  return { v4, v6 };
 }
 
 const describe = (s) =>
@@ -236,9 +246,8 @@ async function cmdList() {
 }
 
 async function cmdIp() {
-  const info = await lookupIp();
-  if (!info?.ip) fail('Could not look up your IP');
-  console.log(`${bold(info.ip)}  ${countryName(info.country)}`);
+  const { v4, v6 } = printIps();
+  if (!v4 && !v6) fail('Could not look up your IP');
 }
 
 async function cmdConnect() {
@@ -283,8 +292,11 @@ async function cmdConnect() {
       }
       current = result.child;
       console.log(`      ${green('✓ Connected')}`);
-      const info = await lookupIp();
-      if (info?.ip) console.log(`      Your IP is now ${bold(info.ip)} (${countryName(info.country)})`);
+      const { v4, v6 } = printIps('      ');
+      if (v6 && (!v4 || v6.country !== v4.country)) {
+        console.log(red(`      ! IPv6 is not going through the VPN: sites that use IPv6 still see ${countryName(v6.country)}.`));
+        console.log(red('        Turn off IPv6 for your network while connected, or use proxy mode instead.'));
+      }
       console.log(dim('      Press Ctrl+C to disconnect'));
       await waitForExit(current);
       current = null;

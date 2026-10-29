@@ -1,7 +1,7 @@
 {
   "name": "geohop",
   "displayName": "geohop",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Lets Claude test websites and APIs from other countries: geo-redirects, prices, banners and Shopify markets. Free proxies via VPN Gate and Tor, no signup, needs Docker.",
   "author": {
     "name": "devnazir"

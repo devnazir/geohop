@@ -1,6 +1,6 @@
 {
   "name": "geohop",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Test websites from other countries: free geo-testing proxies, a browser and a Claude Code plugin. No signup.",
   "type": "module",
   "bin": {
